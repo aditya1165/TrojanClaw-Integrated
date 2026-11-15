@@ -8,6 +8,7 @@ import Landing from "./screens/Landing";
 import HowItWorks from "./screens/HowItWorks";
 import Chat from "./screens/Chat";
 import "./App.css";
+import "./workspace.css";
 
 // Signed out, "home" is the landing page; signed in, it is the chat.
 type Screen = "home" | "how";

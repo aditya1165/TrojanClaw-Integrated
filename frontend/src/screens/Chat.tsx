@@ -15,6 +15,7 @@ import { CardBlock } from "../components/AnswerCards";
 import { cardLinks } from "../lib/cards";
 import { CalendarProposals } from "../components/Calendar";
 import ChatList from "../components/ChatList";
+import CampusWelcome from "../components/CampusWelcome";
 import SettingsDialog from "../components/SettingsDialog";
 import { SourcesDialog, SourcesMenu } from "../components/Sources";
 import type { Theme } from "../theme";
@@ -199,9 +200,9 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
   const activeTitle = conversations?.find((chat) => chat.id === thread.id)?.title || "New chat";
 
   return (
-    <div className="flex h-dvh flex-col bg-bg text-fg md:flex-row">
+    <div className="workspace-shell flex h-dvh flex-col bg-bg text-fg md:flex-row">
       {/* Phones: a top bar opens the sidebar as a drawer. */}
-      <header className="flex h-14 flex-none items-center gap-2 border-b border-line bg-surface px-2 md:hidden">
+      <header className="workspace-mobile-header flex h-14 flex-none items-center gap-2 border-b border-line bg-surface px-2 md:hidden">
         <button type="button" aria-label="Open menu" onClick={() => setDrawer(true)}
           className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:text-fg"><MenuIcon /></button>
         <p className="min-w-0 flex-1 truncate text-center text-sm font-medium">{activeTitle}</p>
@@ -211,7 +212,7 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
       {drawer && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" aria-hidden="true" onClick={() => setDrawer(false)} />}
 
       <aside ref={asideRef} aria-label="Sidebar" style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-col gap-2 border-r border-line bg-surface p-4 transition-transform md:relative md:z-auto md:w-[var(--sidebar-w)] md:max-w-none md:flex-none md:translate-x-0 ${drawer ? "translate-x-0" : "-translate-x-full"}`}>
+        className={`workspace-sidebar fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-col gap-2 border-r border-line bg-surface p-4 transition-transform md:relative md:z-auto md:w-[var(--sidebar-w)] md:max-w-none md:flex-none md:translate-x-0 ${drawer ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Drag (or use the arrow keys) to resize; double-click to reset. */}
         <div role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabIndex={0}
           aria-valuemin={SIDEBAR.min} aria-valuemax={SIDEBAR.max} aria-valuenow={sidebarWidth}
@@ -247,8 +248,9 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
               className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:text-fg md:hidden"><CloseIcon /></button>
           </div>
         </div>
+        <p className="sidebar-edition">A little more connected <span>USC</span></p>
 
-        <Button variant="secondary" onClick={() => openChat(null)} className="justify-start" title="New chat (⌘K)">
+        <Button variant="secondary" onClick={() => openChat(null)} className="sidebar-new-chat justify-start" title="New chat (⌘K)">
           <PlusIcon />
           New chat
         </Button>
@@ -263,7 +265,8 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
           onOpen={(id) => openChat(id)} onRename={rename} onPin={pin} onDelete={remove} />
 
         <Button variant="ghost" onClick={onHowItWorks} className="justify-start">How it works</Button>
-        <div className="flex items-center gap-2 border-t border-line pt-4">
+        <div className="sidebar-profile flex items-center gap-2 border-t border-line pt-4">
+          <span className="profile-avatar" aria-hidden="true">{account.name.trim().slice(0, 1).toUpperCase()}</span>
           <div className="min-w-0 flex-1 text-sm"><p className="truncate font-medium">{account.name}</p><p className="truncate text-xs text-muted">@{account.username}</p></div>
           <button type="button" aria-label="Settings" title="Settings" onClick={() => { setDrawer(false); setShowSettings(true); }}
             className="flex h-10 w-10 flex-none items-center justify-center rounded-xl text-muted hover:bg-subtle hover:text-fg">
@@ -272,13 +275,20 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
         </div>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1">
+      <div className="workspace-content flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="workspace-topbar hidden md:flex">
+          <div className="workspace-breadcrumb"><span>Your workspace</span><span aria-hidden="true">/</span><span className="truncate">{activeTitle}</span></div>
+          <button type="button" onClick={() => setShowSources(true)} className="workspace-source-status">
+            <span className={sourceCount ? "source-dot is-ready" : "source-dot"} />{sourceCount ? `${sourceCount} source${sourceCount === 1 ? "" : "s"} ready` : "Connect your sources"}
+          </button>
+        </header>
         {thread.messages === null ? (
           <main className="flex min-w-0 flex-1 items-center justify-center">
             <p role="status" className="text-sm text-muted">Loading chat…</p>
           </main>
         ) : (
           <ChatThread key={thread.key} conversationId={thread.id} initialMessages={thread.messages}
+            firstName={account.name.trim().split(/\s+/)[0] || ""}
             sources={sources} selectedConnectors={selectedConnectors} onConnectorsChange={onConnectorsChange}
             onManageSources={() => setShowSources(true)} signingOut={signingOut} />
         )}
@@ -292,6 +302,7 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
 }
 
 interface ChatThreadProps {
+  firstName: string;
   conversationId: string | null;
   initialMessages: ChatItem[];
   sources: Sources;
@@ -302,7 +313,7 @@ interface ChatThreadProps {
 }
 
 /** One chat: its messages, calendar drafts and the message box. */
-function ChatThread({ conversationId, initialMessages, sources, selectedConnectors, onConnectorsChange, onManageSources, signingOut }: ChatThreadProps) {
+function ChatThread({ firstName, conversationId, initialMessages, sources, selectedConnectors, onConnectorsChange, onManageSources, signingOut }: ChatThreadProps) {
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<PendingFile[]>([]);
@@ -371,15 +382,12 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
   };
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col">
+    <main className={`chat-thread flex min-h-0 min-w-0 flex-1 flex-col ${messages.length ? "has-messages" : "is-empty"}`}>
       <ReconnectBanner sources={sources} />
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-3xl flex-col gap-7 px-6 py-8">
+      <div className="chat-scroll flex-1 overflow-y-auto">
+        <div className="chat-messages mx-auto flex max-w-3xl flex-col gap-7 px-6 py-8">
           {messages.length === 0 && (
-            <div className="py-[14vh] text-center">
-              <h1 className="text-2xl font-semibold tracking-[-0.03em]">What can I help you with?</h1>
-              <p className="mt-2 text-sm text-muted">Ask about your courses, deadlines or campus.</p>
-            </div>
+            <CampusWelcome firstName={firstName} timezone={timezone} disabled={signingOut} onPrompt={prompt => { setInput(prompt); focusComposer(); }} />
           )}
 
           {messages.map((message) =>
@@ -397,7 +405,7 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
                     ))}
                   </ul>
                 )}
-                <div className="rounded-2xl bg-subtle px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
+                <div className="user-message rounded-2xl bg-subtle px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
               </div>
             ) : message.content ? (
               <Answer key={message.id} content={message.content} sources={message.sources}
@@ -426,12 +434,12 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 pb-4 sm:px-6 sm:pb-5">
+      <div className="composer-dock mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 pb-4 sm:px-6 sm:pb-5">
         <form onSubmit={submit}
           onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }}
           onDragLeave={() => setDragging(false)}
           onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles([...event.dataTransfer.files]); }}
-          className={`flex flex-col gap-2 rounded-2xl border bg-surface py-3 pr-3 pl-4 focus-within:border-muted ${dragging ? "border-accent-fg border-dashed" : "border-line"}`}>
+          className={`chat-composer flex flex-col gap-2 rounded-2xl border bg-surface py-3 pr-3 pl-4 focus-within:border-muted ${dragging ? "border-accent-fg border-dashed" : "border-line"}`}>
           {files.length > 0 && (
             <ul aria-label="Files to send" className="flex flex-wrap gap-2">
               {files.map((file) => (
@@ -484,7 +492,7 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
             )}
           </div>
         </form>
-        <p className="text-center text-xs text-muted">
+        <p className="composer-note text-center text-xs text-muted">
           Calendar changes require your approval. Double-check important dates in Brightspace.
         </p>
       </div>
@@ -505,7 +513,7 @@ function Answer({ content, sources, final }: { content: string; sources: Source[
   const carded = cardLinks(content);
   const rest = sources.filter((source) => !source.url || !carded.has(source.url));
   return (
-    <article className="flex flex-col gap-3">
+    <article className="assistant-answer flex flex-col gap-3">
       <div className="markdown-content">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(final)}>{content}</ReactMarkdown>
       </div>
