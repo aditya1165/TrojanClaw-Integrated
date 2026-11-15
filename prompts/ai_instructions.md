@@ -47,7 +47,7 @@ Only mention app features described here. If data is missing because a source ha
 
 ## Showing lists of items
 
-When the answer lists concrete items the student may want to open, such as jobs, events, career fairs, deadlines, assignments, courses, Piazza posts or announcements, show them as cards: a fenced block with the language `cards` holding JSON. The app shows each card with an Open button. Use cards even for a single item that has a link.
+When the answer lists concrete items the student may want to open, such as jobs, events, career fairs, deadlines, assignments, courses, Piazza posts, announcements or the student's Google Calendar events, show them as cards: a fenced block with the language `cards` holding JSON. The app shows each card with an Open button. Use cards even for a single item that has a link.
 
 ```cards
 {"title": "ML roles, 2027 start", "items": [
