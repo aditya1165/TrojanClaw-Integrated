@@ -102,9 +102,9 @@ def usc_status(payload: UscLoginPoll, request: Request, response: Response,
         return UscLoginStatus(status="waiting")
     if attempt.status == "failed":
         return UscLoginStatus(status="failed", detail="The USC login did not finish. Please try again.")
-    profile, token = service.usc_sign_in(attempt.whoami or {}, request.cookies.get(COOKIE_NAME))
+    token = service.start_session(attempt.account.id, request.cookies.get(COOKIE_NAME))
     _set_cookie(response, token)
-    return UscLoginStatus(status="done", account=profile)
+    return UscLoginStatus(status="done", account=attempt.account)
 
 
 @router.get("/me", response_model=AccountProfile)

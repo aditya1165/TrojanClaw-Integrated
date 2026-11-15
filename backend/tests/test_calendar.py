@@ -267,6 +267,30 @@ def test_chat_tool_only_drafts_and_has_no_approval_tool(service, embedding_failu
     service.request.assert_not_called()
 
 
+def test_selected_connectors_and_calendar_drafts_work_together_for_the_signed_in_account(service, monkeypatch):
+    connectors = MagicMock()
+    connectors.tools.return_value = [{"name": "brightspace__courses"}]
+    connectors.call.return_value = "Course information"
+    monkeypatch.setattr("app.services.chat.get_local_connectors", lambda: connectors)
+    model = MagicMock()
+
+    def respond(messages, prompt, tools, call):
+        assert {tool["name"] for tool in tools} == {"brightspace__courses", "propose_calendar_event"}
+        assert call("brightspace__courses", {}) == "Course information"
+        call("propose_calendar_event", draft().model_dump(mode="json"))
+        return "Review the event."
+
+    model.respond_with_tools.side_effect = respond
+    response = ChatService(None, None, None, model, calendar=service).chat(
+        ChatRequest(messages=[{"role": "user", "content": "Add a study session"}], connectors=["brightspace"]),
+        user_id=USER,
+    )
+    connectors.tools.assert_called_once_with(USER, ["brightspace"])
+    connectors.call.assert_called_once_with(USER, "brightspace__courses", {}, ["brightspace"])
+    assert len(response.calendar_proposals) == 1 and response.calendar_proposals[0].status == "pending"
+    service.request.assert_not_called()
+
+
 def test_followup_recovers_missing_draft_call_and_returns_a_new_approval_card(service):
     model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
     documents.search.return_value = []

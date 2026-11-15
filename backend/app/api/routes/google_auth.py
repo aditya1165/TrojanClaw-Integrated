@@ -69,7 +69,8 @@ def status(request: Request, response: Response, payload: UscLoginPoll,
     response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/auth/google")
     if usc.status == "failed":
         return UscLoginStatus(status="failed", detail=usc.detail or "The USC connection did not finish. Please retry using your USC account.")
-    profile, session = auth.usc_sign_in(usc.whoami or {}, request.cookies.get(COOKIE_NAME))
+    profile = usc.account
+    session = auth.start_session(profile.id, request.cookies.get(COOKIE_NAME))
     _set_cookie(response, session)
     detail = None
     try:

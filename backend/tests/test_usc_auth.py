@@ -2,6 +2,7 @@
 
 import threading
 import time
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -12,11 +13,12 @@ from psycopg2.errors import UniqueViolation
 import app.api.routes.auth as auth_routes
 from app.main import app
 from app.models.auth import AccountProfile
-from app.services.auth import AuthService, COOKIE_NAME, get_auth_service, usc_usernames
+from app.services.auth import AuthService, COOKIE_NAME, get_auth_service, token_hash, usc_usernames
 from app.services.usc_auth import UscLogin, handshake_origin
 from tests.test_auth import StubDatabase
 
 WHOAMI = {"Identifier": "12345", "FirstName": "Tommy", "LastName": "Trojan", "UniqueName": "ttrojan@usc.edu"}
+ACCOUNT = AccountProfile(id=uuid4(), name="Tommy Trojan", username="ttrojan")
 
 
 def wait_until_finished(login: UscLogin, attempt_id: str):
@@ -27,30 +29,32 @@ def wait_until_finished(login: UscLogin, attempt_id: str):
         time.sleep(0.01)
 
 
+def sign_in(position, identify, ready):
+    """A fake popup: the student logs in, the account is found, the page may continue."""
+    identify(WHOAMI)
+    ready()
+
+
 def test_usc_usernames_prefer_usc_username_then_brightspace_id():
     assert usc_usernames("ttrojan@usc.edu", "12345") == ["ttrojan", "usc_12345"]
     assert usc_usernames("T.Trojan", "12345") == ["t_trojan", "usc_12345"]
     assert usc_usernames("ab", "12345") == ["usc_12345"]
 
 
-def test_existing_usc_account_signs_in_without_creating_a_user():
-    user_id = str(uuid4())
-    database = StubDatabase((user_id, "Tommy Trojan", "ttrojan"))
-    profile, token = AuthService(database).usc_sign_in(WHOAMI, None)
+def test_existing_usc_account_is_found_without_creating_a_user():
+    database = StubDatabase((str(uuid4()), "Tommy Trojan", "ttrojan"))
+    profile = AuthService(database).find_or_create_usc_account(WHOAMI)
     assert profile.username == "ttrojan"
     sql = [call.args[0] for call in database.cursor.execute.call_args_list]
     assert "brightspace_user_id" in sql[0]
     assert database.cursor.execute.call_args_list[0].args[1] == ("12345",)
-    assert not any("INSERT INTO public.app_users" in statement for statement in sql)
-    assert any("INSERT INTO public.account_sessions" in statement for statement in sql)
-    assert token
+    assert not any("INSERT" in statement for statement in sql)  # no user and no session yet
 
 
 def test_new_usc_account_is_created_with_brightspace_id():
-    user_id = str(uuid4())
     database = StubDatabase()
-    database.cursor.fetchone.side_effect = [None, (user_id, "Tommy Trojan", "ttrojan")]
-    profile, _ = AuthService(database).usc_sign_in(WHOAMI, None)
+    database.cursor.fetchone.side_effect = [None, (str(uuid4()), "Tommy Trojan", "ttrojan")]
+    profile = AuthService(database).find_or_create_usc_account(WHOAMI)
     assert profile.name == "Tommy Trojan"
     insert = next(c.args[1] for c in database.cursor.execute.call_args_list if "INSERT INTO public.app_users" in c.args[0])
     assert insert[1:3] == ("Tommy Trojan", "ttrojan")
@@ -58,9 +62,8 @@ def test_new_usc_account_is_created_with_brightspace_id():
 
 
 def test_taken_username_falls_back_to_brightspace_id():
-    user_id = str(uuid4())
     database = StubDatabase()
-    database.cursor.fetchone.side_effect = [None, (user_id, "Tommy Trojan", "usc_12345")]
+    database.cursor.fetchone.side_effect = [None, (str(uuid4()), "Tommy Trojan", "usc_12345")]
     inserts = []
 
     def execute(sql, params=None):
@@ -70,20 +73,29 @@ def test_taken_username_falls_back_to_brightspace_id():
                 raise UniqueViolation()
 
     database.cursor.execute.side_effect = execute
-    profile, _ = AuthService(database).usc_sign_in(WHOAMI, None)
+    profile = AuthService(database).find_or_create_usc_account(WHOAMI)
     assert inserts == ["ttrojan", "usc_12345"]
     assert profile.username == "usc_12345"
 
 
 def test_whoami_without_identifier_is_rejected():
     with pytest.raises(HTTPException) as exc:
-        AuthService(StubDatabase()).usc_sign_in({"UniqueName": "ttrojan"}, None)
+        AuthService(StubDatabase()).find_or_create_usc_account({"UniqueName": "ttrojan"})
     assert exc.value.status_code == 502
+
+
+def test_start_session_stores_only_the_token_hash():
+    database = StubDatabase()
+    token = AuthService(database).start_session(ACCOUNT.id, None)
+    session_insert = next(c.args[1] for c in database.cursor.execute.call_args_list
+                          if "INSERT INTO public.account_sessions" in c.args[0])
+    assert session_insert[:2] == (token_hash(token), str(ACCOUNT.id))
+    assert token not in repr(database.cursor.execute.call_args_list)
 
 
 def test_only_one_login_window_at_a_time():
     release = threading.Event()
-    login = UscLogin(run_login=lambda position, signed_in: release.wait(1) and signed_in(WHOAMI))
+    login = UscLogin(run_login=lambda position, identify, ready: release.wait(1), find_account=lambda w: ACCOUNT)
     login.start()
     with pytest.raises(HTTPException) as exc:
         login.start()
@@ -95,19 +107,18 @@ def test_only_one_login_window_at_a_time():
 def usc_routes(monkeypatch):
     positions = []
 
-    def run_login(position, signed_in):
+    def run_login(position, identify, ready):
         positions.append(position)
-        signed_in(WHOAMI)
+        sign_in(position, identify, ready)
 
-    login = UscLogin(run_login=run_login)
+    login = UscLogin(run_login=run_login, find_account=lambda whoami: ACCOUNT)
     login.positions = positions
     monkeypatch.setattr(auth_routes, "usc_login", login)
-    profile = AccountProfile(id=uuid4(), name="Tommy Trojan", username="ttrojan")
 
     class StubService:
-        def usc_sign_in(self, whoami, old_token):
-            assert whoami == WHOAMI
-            return profile, "session-token"
+        def start_session(self, user_id, old_token):
+            assert user_id == ACCOUNT.id
+            return "session-token"
 
     app.dependency_overrides[get_auth_service] = StubService
     yield login
@@ -138,15 +149,52 @@ def test_popup_position_reaches_the_login(usc_routes):
 
 
 def test_setup_failure_after_sign_in_keeps_the_sign_in():
-    def sign_in_then_fail_setup(position, signed_in):
-        signed_in(WHOAMI)
+    def sign_in_then_fail_setup(position, identify, ready):
+        sign_in(position, identify, ready)
         raise RuntimeError("Handshake setup failed")
 
-    login = UscLogin(run_login=sign_in_then_fail_setup)
+    login = UscLogin(run_login=sign_in_then_fail_setup, find_account=lambda whoami: ACCOUNT)
     attempt_id = login.start()
     wait_until_finished(login, attempt_id)
     time.sleep(0.05)  # let the setup failure happen
-    assert login.take(attempt_id).status == "done"
+    attempt = login.take(attempt_id)
+    assert attempt.status == "done" and attempt.account == ACCOUNT
+
+
+def test_account_lookup_failure_fails_the_sign_in():
+    def no_account(whoami):
+        raise HTTPException(502, "Brightspace did not say who logged in.")
+
+    login = UscLogin(run_login=sign_in, find_account=no_account)
+    attempt_id = login.start()
+    wait_until_finished(login, attempt_id)
+    assert login.take(attempt_id).status == "failed"
+
+
+@pytest.mark.parametrize("username,accepted", [("someone_else@usc.edu", False), ("1234567890", True), ("ttrojan@usc.edu", True)])
+def test_google_identity_is_checked_before_account_sessions_are_saved(username, accepted):
+    find_account = MagicMock(return_value=ACCOUNT)
+    saved_for = []
+    whoami = {**WHOAMI, "UniqueName": username}
+
+    def popup(position, identify, ready):
+        account = identify(whoami)
+        saved_for.append(account.id)
+        ready()
+
+    login = UscLogin(run_login=popup, find_account=find_account)
+    attempt_id = login.start(expected_email="ttrojan@usc.edu")
+    wait_until_finished(login, attempt_id)
+    attempt = login.take(attempt_id)
+    if accepted:
+        assert attempt.status == "done"
+        assert attempt.account == ACCOUNT and attempt.whoami == whoami
+        assert saved_for == [ACCOUNT.id]
+        find_account.assert_called_once_with(whoami)
+    else:
+        assert attempt.status == "failed" and "different USC accounts" in attempt.detail
+        assert saved_for == []
+        find_account.assert_not_called()
 
 
 def test_handshake_origin_accepts_only_handshake_pages():
@@ -157,10 +205,10 @@ def test_handshake_origin_accepts_only_handshake_pages():
 
 
 def test_failed_usc_login_reports_failure(monkeypatch):
-    def fail(position, signed_in):
+    def fail(position, identify, ready):
         raise TimeoutError("closed")
 
-    login = UscLogin(run_login=fail)
+    login = UscLogin(run_login=fail, find_account=lambda whoami: ACCOUNT)
     monkeypatch.setattr(auth_routes, "usc_login", login)
     with TestClient(app) as client:
         attempt_id = client.post("/auth/usc/start").json()["attempt_id"]

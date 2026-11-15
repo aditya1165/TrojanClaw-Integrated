@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import secrets
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from psycopg2.errors import UniqueViolation
@@ -111,8 +111,8 @@ class AuthService:
                 token = self._new_session(cursor, str(row[0]), old_token)
         return _profile(row), token
 
-    def usc_sign_in(self, whoami: dict, old_token: str | None) -> tuple[AccountProfile, str]:
-        """Sign in (creating the account on first use) from Brightspace's whoami after a USC login.
+    def find_or_create_usc_account(self, whoami: dict) -> AccountProfile:
+        """The account for Brightspace's whoami after a USC login, created on first use.
 
         USC accounts are matched only by Brightspace user ID, never by username, so a USC login
         can never take over a username/password account.
@@ -148,12 +148,14 @@ class AuthService:
                     continue  # username taken by another account; try the next one
             if row is None:
                 raise HTTPException(409, "Could not create an account for this USC login.")
+        logger.info("USC login: TrojanClaw user %s", row[2])
+        return _profile(row)
 
+    def start_session(self, user_id: UUID | str, old_token: str | None) -> str:
+        """A new browser session for an account that has already proven who it is."""
         with self.database.connection() as connection:
             with connection.cursor() as cursor:
-                token = self._new_session(cursor, str(row[0]), old_token)
-        logger.info("USC login: signed in as TrojanClaw user %s", row[2])
-        return _profile(row), token
+                return self._new_session(cursor, str(user_id), old_token)
 
     def current_user(self, token: str | None) -> AccountProfile:
         if not token or len(token) > 128:

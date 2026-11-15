@@ -182,7 +182,8 @@ def test_http_signin_connects_calendar_only_after_brightspace_verification(setup
     monkeypatch.setattr(routes, "google_signin", flow)
     auth = MagicMock()
     profile = AccountProfile(id=UUID(int=2), name="Tommy Trojan", username="ttrojan")
-    auth.usc_sign_in.return_value = (profile, "new-session")
+    usc.take.return_value.account = profile
+    auth.start_session.return_value = "new-session"
     if calendar_fails:
         calendar.complete_connection.side_effect = AppError("MCP not enabled", "calendar_mcp_access", 502)
     app.dependency_overrides[get_auth_service] = lambda: auth
@@ -195,7 +196,7 @@ def test_http_signin_connects_calendar_only_after_brightspace_verification(setup
         assert "private-access-token" not in start.text
         state = parse_qs(urlparse(start.json()["url"]).query)["state"][0]
         assert client.get("/auth/google/callback", params={"state": state, "code": "code"}, follow_redirects=False).status_code == 303
-        auth.usc_sign_in.assert_not_called()
+        auth.start_session.assert_not_called()
         calendar.complete_connection.assert_not_called()
         finish = client.post("/auth/google/finish", json={"left": 10, "top": 20})
         attempt_id = finish.json()["attempt_id"]
@@ -204,6 +205,7 @@ def test_http_signin_connects_calendar_only_after_brightspace_verification(setup
         assert done.json()["account"]["username"] == "ttrojan"
         assert bool(done.json()["detail"]) == calendar_fails
         assert client.cookies.get(COOKIE_NAME) == "new-session"
+        auth.start_session.assert_called_once_with(profile.id, None)
         assert client.cookies.get(GOOGLE_ATTEMPT_COOKIE) is None
         calendar.complete_connection.assert_called_once_with(profile.id, TOKENS)
         assert client.post("/auth/google/status", json={"attempt_id": attempt_id}).status_code == 400
