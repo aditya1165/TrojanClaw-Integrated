@@ -158,7 +158,7 @@ class AuthService:
                 return self._new_session(cursor, str(user_id), old_token)
 
     def current_user(self, token: str | None) -> AccountProfile:
-        if not token or len(token) > 128:
+        if not token or len(token) > 128 or token.startswith(("tc_pair_", "tc_mcp_", "tc_oauth_")):
             raise HTTPException(401, "Please sign in.")
         with self.database.connection() as connection:
             with connection.cursor() as cursor:
@@ -170,6 +170,27 @@ class AuthService:
         if not row:
             raise HTTPException(401, "Your session has expired. Please sign in again.")
         return _profile(row)
+
+    def create_mobile_pairing(self, user_id: UUID) -> str:
+        code = "tc_pair_" + secrets.token_urlsafe(24)
+        with self.database.connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO public.account_sessions (token_hash, user_id, expires_at) VALUES (%s, %s, now() + interval '2 minutes')",
+                (token_hash(code), str(user_id)),
+            )
+        return code
+
+    def redeem_mobile_pairing(self, code: str) -> str:
+        if not code.startswith("tc_pair_") or len(code) != 40:
+            raise HTTPException(401, "Invalid or expired pairing code.")
+        with self.database.connection() as connection, connection.cursor() as cursor:
+            # Consume once and create the phone session in the same transaction.
+            cursor.execute("DELETE FROM public.account_sessions WHERE token_hash = %s AND expires_at > now() RETURNING user_id",
+                           (token_hash(code),))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(401, "Invalid or expired pairing code.")
+            return self._new_session(cursor, str(row[0]), None)
 
     def logout(self, token: str | None) -> None:
         if token:

@@ -8,11 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
+from starlette.routing import Route
 import anthropic
 from google.genai import errors as genai_errors
 import psycopg2
 
-from app.api.routes import auth, chat, health, integrations, engagesc, calendar, google_auth
+from app.api.routes import auth, chat, health, integrations, engagesc, calendar, google_auth, mobile, mcp_connection
 from app.config import ConfigurationError, get_settings
 from app.database import get_database
 from app.errors import AppError
@@ -23,9 +24,18 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    yield
-    get_database().close()
+async def lifespan(application: FastAPI):
+    try:
+        factory = getattr(application.state, "remote_mcp_factory", None)
+        remote = factory() if factory else None
+        if remote:
+            application.state.remote_mcp = remote
+            async with remote.router.lifespan_context(remote):
+                yield
+        else:
+            yield
+    finally:
+        get_database().close()
 
 
 def create_app() -> FastAPI:
@@ -46,7 +56,7 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        if request.url.path.startswith("/auth/"):
+        if request.url.path.startswith(("/auth/", "/assistant/")) or request.url.path == "/mobile/pairing/redeem":
             # Pydantic's default error input can contain submitted passwords.
             return JSONResponse(status_code=422, content={"detail": [
                 {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
@@ -92,6 +102,24 @@ def create_app() -> FastAPI:
     # Register fixed EngageSC paths before /integrations/{provider}/... routes.
     application.include_router(engagesc.router)
     application.include_router(integrations.router)
+    application.include_router(mobile.router)
+    application.include_router(mcp_connection.router)
+    if settings.mcp_public_url:
+        from app.remote_mcp import create_remote_mcp
+        from app.services.mcp_auth import get_mcp_oauth
+        def remote_factory():
+            return create_remote_mcp(get_mcp_oauth())
+        remote = remote_factory()
+        application.state.remote_mcp = remote
+        application.state.remote_mcp_factory = remote_factory
+        # Keep OAuth discovery at the origin root, as required by remote MCP clients.
+        # Dispatch only the SDK's exact paths; a catch-all mount masks API 405s.
+        class RemoteDispatcher:
+            async def __call__(self, scope, receive, send):
+                await application.state.remote_mcp(scope, receive, send)
+        dispatcher = RemoteDispatcher()
+        application.router.routes.extend(Route(route.path, endpoint=dispatcher,
+            methods=route.methods) for route in remote.routes)
     return application
 
 

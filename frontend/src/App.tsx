@@ -7,6 +7,7 @@ import Landing from "./screens/Landing";
 import Connect from "./screens/Connect";
 import Chat from "./screens/Chat";
 import "./App.css";
+import { AssistantConsent } from "./components/AssistantConsent";
 
 type Screen = "landing" | "connect" | "chat";
 type AuthMode = "login" | "register";
@@ -26,6 +27,7 @@ export default function App() {
   const [settingUp, setSettingUp] = useState(false);
   const [googleSetup, setGoogleSetup] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const [assistantRequest] = useState(() => new URLSearchParams(window.location.search).get("mcp_request"));
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -90,11 +92,17 @@ export default function App() {
 
   return (
     <>
+      {assistantRequest && !account && !checkingSession && <div className="flex items-center justify-between gap-4 border-b border-line bg-subtle px-6 py-3 text-sm text-fg">
+        <span>Sign in to review your assistant's request to connect to TrojanClaw.</span>
+        <button type="button" className="underline" onClick={() => { setAuthMode("login"); setShowAuth(true); }}>Sign in</button>
+      </div>}
       {notice && <div role="status" className="flex items-center justify-between gap-4 border-b border-line bg-subtle px-6 py-3 text-sm text-fg">
         <span>{notice}</span>
         <button type="button" className="underline" onClick={() => setNotice("")}>Dismiss</button>
       </div>}
-      {account && screen === "connect" ? (
+      {account && assistantRequest ? (
+        <AssistantConsent key={account.id} request={assistantRequest} account={account} />
+      ) : account && screen === "connect" ? (
         <Connect theme={theme} onToggleTheme={toggleTheme} account={account}
           selectedConnectors={selectedConnectors} onConnectorsChange={setSelectedConnectors}
           onBack={() => setScreen("landing")} onContinue={() => setScreen("chat")}

@@ -73,10 +73,11 @@ class ChatService:
         self._calendar = calendar
 
     async def chat(
-        self, request: ChatRequest, *, user_id: UUID, use_saved_connectors: bool = False
+        self, request: ChatRequest, *, user_id: UUID, use_saved_connectors: bool = False,
+        allow_calendar_drafts: bool = True,
     ) -> ChatResponse:
         messages = [{"role": message.role.value, "content": message.content} for message in request.messages]
-        calendar = self._calendar if self._calendar is not None and self._calendar.configured else None
+        calendar = self._calendar if allow_calendar_drafts and self._calendar is not None and self._calendar.configured else None
         proposals: list[CalendarProposal] = []
         questions: list[str] = []
         rejected: list[str] = []  # drafts refused because their times didn't match the latest message

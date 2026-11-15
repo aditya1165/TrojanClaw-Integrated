@@ -12,6 +12,7 @@ Connector notes:
 - [handshake.md](handshake.md): Handshake MCP connector and allowlist
 - [docs/piazza.md](docs/piazza.md): `mcp-piazza`, login methods, tool allowlist (Piazza cannot use the USC login)
 - [docs/google-calendar.md](docs/google-calendar.md): Google OAuth setup, event proposals, and mandatory approval
+- [docs/gemini-connected-app.md](docs/gemini-connected-app.md): Let Gemini ask TrojanClaw questions through an authenticated remote MCP connection
 
 ## Layout
 
@@ -19,6 +20,7 @@ Connector notes:
 | :--- | :--- |
 | `backend/` | FastAPI app (Python 3.11) |
 | `frontend/` | React 19 + Vite + TypeScript |
+| [`mobile/`](mobile/README.md) | React Native Android app, native Gemini AppFunctions and account pairing |
 | `integrations/handshake/` | Connector helper (Brightspace + Handshake MCP, Python 3.12+) |
 | `integrations/piazza/` | Account-scoped Piazza MCP and persistent Chromium sign-in (Python 3.12+) |
 | `supabase/migrations/` | Database schema |
