@@ -30,7 +30,7 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     messages: list[ChatMessage] = Field(min_length=1, max_length=100)
-    connectors: list[str] = Field(default_factory=list, max_length=2)
+    connectors: list[str] = Field(default_factory=list, max_length=3)
     timezone: str = Field(default="America/Los_Angeles", max_length=100)
 
     @field_validator("timezone")
@@ -45,8 +45,8 @@ class ChatRequest(BaseModel):
     @field_validator("connectors")
     @classmethod
     def supported_connectors(cls, value: list[str]) -> list[str]:
-        if any(provider not in {"brightspace", "handshake"} for provider in value):
-            raise ValueError("Only Brightspace and Handshake are available.")
+        if any(provider not in {"brightspace", "handshake", "piazza"} for provider in value):
+            raise ValueError("Only Brightspace, Handshake and Piazza are available.")
         return list(dict.fromkeys(value))
 
     @model_validator(mode="after")

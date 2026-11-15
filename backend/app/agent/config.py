@@ -9,7 +9,7 @@ import yaml
 from app.config import ConfigurationError, Settings
 
 _EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
-_CONNECTORS = {"brightspace", "handshake"}  # live connectors in app.integrations.local
+_CONNECTORS = {"brightspace", "handshake", "piazza"}  # live connectors in app.integrations.local
 
 
 @dataclass(frozen=True, slots=True)

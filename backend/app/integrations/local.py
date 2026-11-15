@@ -45,19 +45,16 @@ class LocalConnectors:
         results = []
         with self._lock:
             for provider in IntegrationProvider:
-                if provider == IntegrationProvider.piazza:
-                    state, message = IntegrationState.unavailable, "Coming soon"
-                else:
-                    saved = (root / provider.value / "cookies.json").exists()
-                    state, message = self._states.get((user, provider.value), (
-                        IntegrationState.saved if saved else IntegrationState.not_configured, None,
-                    ))
+                saved = (root / provider.value / "cookies.json").exists()
+                state, message = self._states.get((user, provider.value), (
+                    IntegrationState.saved if saved else IntegrationState.not_configured, None,
+                ))
                 results.append(IntegrationStatus(provider=provider, state=state,
                                                  transport="stdio", message=message))
         return results
 
     def _require_provider(self, provider: str) -> None:
-        if provider not in {"handshake", "brightspace"}:
+        if provider not in {"handshake", "brightspace", "piazza"}:
             raise AppError("This connector is coming soon.", "connector_unavailable", 400)
 
     def _state(self, user_id: UUID | str, provider: str) -> IntegrationState | None:
@@ -70,11 +67,18 @@ class LocalConnectors:
 
     def _run(self, user_id: UUID | str, provider: str, action: str, **payload) -> dict:
         self._require_provider(provider)
-        python = self.project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        project = self.project.parent / "piazza" if provider == "piazza" else self.project
+        module = "trojanclaw_piazza.bridge" if provider == "piazza" else "trojanclaw_handshake.bridge"
+        python = project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if not python.exists():
             raise AppError("Install the local connectors first; see the setup guide.", "connector_not_installed", 503)
         root = user_root(user_id)
         env = os.environ.copy()
+        if provider == "piazza":
+            env = {key: value for key, value in env.items() if key.upper() in {
+                "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "HOME", "USERPROFILE",
+                "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "PLAYWRIGHT_BROWSERS_PATH",
+            }}
         # The helper reads every session only from these two folders: this account's.
         env.update({"TROJANCLAW_SESSION_DIR": str(root),
                     "HANDSHAKE_DIR": str(root / "handshake"),
@@ -86,7 +90,7 @@ class LocalConnectors:
             env["PATH"] = str(candidates[-1]) + os.pathsep + env.get("PATH", "")
         try:
             process = subprocess.run(
-                [str(python), "-m", "trojanclaw_handshake.bridge"],
+                [str(python), "-m", module],
                 input=json.dumps({"provider": provider, "action": action, **payload}),
                 capture_output=True, text=True, encoding="utf-8", env=env,
                 timeout=365 if action == "connect" else 100,
@@ -95,8 +99,8 @@ class LocalConnectors:
             result = json.loads(process.stdout)
             if process.returncode or not result.get("ok"):
                 login_errors = {
-                    "login_closed": "The Handshake window closed before sign-in was confirmed. Reconnect and leave it open until it closes automatically.",
-                    "login_timeout": "Handshake did not confirm a signed-in account within five minutes. Reconnect and finish signing in in Chromium.",
+                    "login_closed": f"The {provider.title()} window closed before sign-in was confirmed. Reconnect and leave it open until it closes automatically.",
+                    "login_timeout": f"{provider.title()} did not confirm a signed-in account within five minutes. Reconnect and finish signing in in Chromium.",
                 }
                 if result.get("code") in login_errors:
                     raise AppError(login_errors[result["code"]], result["code"], 502)

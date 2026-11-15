@@ -35,8 +35,9 @@ goals:
       - list_campus_events
       - get_data_status
     # Live read-only connectors the student can tick in chat ("Use in chat"). Their tools
-    # (`brightspace__*`, `handshake__*`) are added only when selected; the connector
+    # (`brightspace__*`, `handshake__*`, `piazza__*`) use the account's saved sessions; the connector
     # helper keeps its own tool allowlist (see CONNECTORS.md).
     connectors:
       - brightspace
       - handshake
+      - piazza

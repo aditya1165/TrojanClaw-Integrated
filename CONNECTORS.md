@@ -1,6 +1,6 @@
 # Chat connectors
 
-The main chat supports Brightspace and Handshake with separate persistent Chromium profiles. Piazza is shown as **Coming soon** and cannot be selected or called.
+The main chat supports Brightspace, Handshake and Piazza with separate, account-scoped persistent Chromium profiles. Piazza has its own sign-in; see [Piazza setup](docs/piazza.md).
 
 Once a connector has a saved session, chat uses it automatically: the student signs in once (Sign in with USC or **Connect**) and then just asks. See [How chat uses connectors](#how-chat-uses-connectors).
 
@@ -12,6 +12,8 @@ From the repository root:
 
 ```sh
 uv sync --locked --project integrations/handshake
+uv sync --locked --project integrations/piazza --python 3.12
+uv run --locked --project integrations/piazza patchright install chromium
 uv run --locked --project integrations/handshake patchright install chromium
 ```
 
@@ -80,7 +82,7 @@ After an app restart, cards with stored session data show **Session saved**, and
 Chat runs one Claude agent (`backend/app/agent/runtime.py`, configured in `config/agent.yaml` and `prompts/ai_instructions.md`). Each run gets:
 
 - **TrojanClaw MCP tools** (`backend/app/mcp_server/server.py`), bound to the signed-in account: `list_deadlines`, `list_announcements`, `search_student_context`, `search_campus_knowledge`, `list_campus_events`, `get_data_status`.
-- **Connector tools** for each live connector, named `brightspace__<tool>` and `handshake__<tool>`. A connector is included when:
+- **Connector tools** for each live connector, named `brightspace__<tool>`, `handshake__<tool>` and `piazza__<tool>`. A connector is included when:
   - the student ticked **Use in chat** for it (the request's `connectors` list), or
   - its card state is **Session saved** or **Connected** for the signed-in account, and the request comes from this computer (the same loopback and origin check as the connector endpoints).
 
@@ -94,7 +96,7 @@ To avoid reconnecting on every question:
 
 - **Tool definitions are cached.** The backend lists a connector's tools once per account (one helper run, about 1–2 seconds) and keeps them in memory until the backend restarts.
 - **Helpers start only when needed.** A helper process starts only when Claude actually calls a connector tool. Questions that don't need Brightspace or Handshake never start one.
-- **Each call uses the signed-in account's saved session.** It runs `trojanclaw_handshake.bridge` with that account's session files only. It never opens a login window; logins happen only through **Connect** or Sign in with USC.
+- **Each call uses the signed-in account's saved session.** It runs `trojanclaw_handshake.bridge` or the isolated `trojanclaw_piazza.bridge` with that account's session files only. Reads never open a login window; logins happen through **Connect** or Sign in with USC (Brightspace/Handshake only).
 - **Expired sessions are left out.** If listing a saved connector's tools fails, the chat carries on without that connector. If a tool call fails, the card switches to **Sign in again**.
 
 Connector answers list **Brightspace** or **Handshake** in the response's `sources`.
@@ -116,6 +118,9 @@ connectors/
         profile/          # Upstream persistent Chromium state (Connect button)
         cookies.json      # Captured Handshake session
         origin.json       # Authenticated Handshake school address used by MCP
+      piazza/
+        profile/          # Account-specific persistent Chromium sign-in
+        cookies.json      # Only Piazza's session_id and piazza_session
 ```
 
 The backend passes the helper only that account's folders (`TROJANCLAW_SESSION_DIR` and `HANDSHAKE_DIR`), so the helper itself needs no account logic. Sign in with USC writes the same files into the signing-in account's folder. It uses an in-memory browser context, so it creates no profile folder and keeps no USC login cookies.

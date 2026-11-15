@@ -36,7 +36,7 @@ def test_saved_sessions_survive_backend_restart_and_remain_separate(connectors):
     path.parent.mkdir(parents=True)
     path.write_text("[]")
     statuses = {item.provider: item.state for item in connectors.statuses(USER)}
-    assert statuses == {"brightspace": "saved", "handshake": "not_configured", "piazza": "unavailable"}
+    assert statuses == {"brightspace": "saved", "handshake": "not_configured", "piazza": "not_configured"}
 
 
 def test_connection_job_marks_verified_login_connected(connectors, monkeypatch):
@@ -72,9 +72,9 @@ def test_login_timeout_reports_specific_safe_error(connectors, monkeypatch, tmp_
     assert "private-test-value" not in result.value.message
 
 
-def test_piazza_and_unselected_connector_are_blocked(connectors):
+def test_unknown_and_unselected_connector_are_blocked(connectors):
     with pytest.raises(AppError):
-        connectors.connect(USER, "piazza")
+        connectors.connect(USER, "unknown")
     with pytest.raises(AppError):
         connectors.call(USER, "handshake__hs_get_profile", {}, ["brightspace"])
 
@@ -125,7 +125,7 @@ def test_chat_forwards_selected_connectors_to_the_agent():
 
 def test_chat_goal_allows_connectors_and_keeps_campus_event_tool():
     goal = load_agent_config(get_settings()).goal("chat")
-    assert set(goal.connectors) == {"brightspace", "handshake"}
+    assert set(goal.connectors) == {"brightspace", "handshake", "piazza"}
     assert "list_campus_events" in goal.tools
 
 
@@ -167,19 +167,16 @@ def test_connector_line_names_selected_sources():
     assert "`brightspace__`" in _connectors_line(["brightspace"])
 
 
-@pytest.mark.usefixtures("signed_in_account")
-def test_piazza_is_not_selectable_in_chat():
-    response = TestClient(app).post("/chat", json={
-        "messages": [{"role": "user", "content": "Hello"}], "connectors": ["piazza"],
-    })
-    assert response.status_code == 422
+def test_all_three_connectors_are_selectable_in_chat():
+    request = ChatRequest(messages=[{"role":"user", "content":"Hello"}], connectors=['piazza','brightspace','handshake'])
+    assert request.connectors == ['piazza','brightspace','handshake']
 
 
 class SavedConnectors:
     """Fake LocalConnectors. `states` maps account -> provider -> state (default: USER has Brightspace saved)."""
 
     def __init__(self, states=None, failing=()):
-        self.states = states or {USER: {"brightspace": "saved", "handshake": "not_configured", "piazza": "unavailable"}}
+        self.states = states or {USER: {"brightspace": "saved", "handshake": "not_configured", "piazza": "not_configured"}}
         self.failing = set(failing)
         self.listed = []
 
@@ -200,6 +197,34 @@ def _runtime(connectors):
 
 
 ALLOWED = ("brightspace", "handshake")
+
+
+def test_piazza_saved_session_is_available_to_only_its_owner():
+    fake = SavedConnectors({USER:{'piazza':'saved'}, OTHER:{'piazza':'not_configured'}})
+    runtime = _runtime(fake)
+    allowed = ('brightspace','handshake','piazza')
+    providers, definitions = asyncio.run(runtime._connector_definitions_for(USER, allowed, [], True))
+    assert providers == ['piazza'] and definitions[0]['name'] == 'piazza__tool'
+    assert asyncio.run(runtime._connector_definitions_for(OTHER, allowed, [], True))[0] == []
+
+
+def test_piazza_uses_separate_runtime_and_only_account_scoped_environment(connectors, monkeypatch, tmp_path):
+    connectors.project = tmp_path / 'handshake'
+    executable = tmp_path / 'piazza' / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    calls = []
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout='{"ok":true,"connected":true}')
+    monkeypatch.setenv('ANTHROPIC_API_KEY','must-not-inherit')
+    monkeypatch.setenv('PIAZZA_COOKIE_FILE','must-not-inherit')
+    monkeypatch.setattr('app.integrations.local.subprocess.run', run)
+    connectors._run(USER, 'piazza', 'verify')
+    args, options = calls[0]
+    assert args == [str(executable), '-m', 'trojanclaw_piazza.bridge']
+    assert options['env']['TROJANCLAW_SESSION_DIR'] == str(user_root(USER))
+    assert 'ANTHROPIC_API_KEY' not in options['env'] and 'PIAZZA_COOKIE_FILE' not in options['env']
 
 
 def test_saved_sessions_are_used_without_ticking_and_tools_are_listed_once():

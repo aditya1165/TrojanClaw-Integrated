@@ -47,6 +47,7 @@ McpServerFactory = Callable[[UUID], MCPServer]
 _CONNECTOR_SOURCES = {
     "brightspace": {"title": "Brightspace", "url": "https://brightspace.usc.edu", "kind": "connector"},
     "handshake": {"title": "Handshake", "url": "https://usc.joinhandshake.com", "kind": "connector"},
+    "piazza": {"title": "Piazza", "url": "https://piazza.com", "kind": "connector"},
 }
 
 
