@@ -14,7 +14,7 @@ const SOURCES = [
   { name: "Brightspace", reads: "Courses, assignments, grades, announcements", change: "No" },
   { name: "Handshake", reads: "Jobs, internships, career events", change: "No" },
   { name: "EngageSC", reads: "Public USC campus events", change: "No" },
-  { name: "Google Calendar", reads: "Your calendar, to add events", change: "Only events you approve" },
+  { name: "Google Calendar", reads: "Your events, to answer and plan around them", change: "Only additions and changes you approve" },
   { name: "Piazza (separate sign-in)", reads: "Class Q&A threads", change: "No" },
 ];
 

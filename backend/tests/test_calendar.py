@@ -18,7 +18,7 @@ from anthropic.lib.tools import ToolError
 from app.agent.runtime import AgentResult
 from app.errors import AppError, DependencyUnavailableError
 from app.main import app
-from app.models.calendar import CalendarEventDraft
+from app.models.calendar import CalendarEventDraft, CalendarEventQuery
 from app.models.chat import ChatRequest
 from app.services.calendar import GoogleCalendar, SCOPES, get_calendar_service
 from app.services.chat import ChatService
@@ -121,6 +121,56 @@ def success(proposal_id):
                     extendedProperties={"private": {"trojanclaw_proposal": str(proposal_id)}})
 
 
+def test_listing_events_is_scoped_read_only_and_preserves_all_day_dates(service):
+    service.request.return_value = response(events=[
+        {"id": "external", "summary": "Outside chat", "start": {"dateTime": "2030-11-17T15:00:00-08:00"}, "end": {"dateTime": "2030-11-17T15:20:00-08:00"}, "description": "unneeded private text"},
+        {"id": "all-day", "summary": "Holiday", "start": {"date": "2030-11-18"}, "end": {"date": "2030-11-19"}},
+    ], limited=False)
+    service.request.side_effect = None
+    result = service.list_events(USER, CalendarEventQuery(), "America/Los_Angeles")
+    assert len(result["events"]) == 2
+    assert "description" not in result["events"][0]
+    assert result["events"][1]["start"] == {"date": "2030-11-18"}
+    args, kwargs = service.request.call_args
+    assert args[1:] == ("GET", "/calendars/primary/events")
+    assert datetime.fromisoformat(kwargs["params"]["timeMax"]) - datetime.fromisoformat(kwargs["params"]["timeMin"]) == timedelta(days=7)
+    with pytest.raises(AppError, match="Connect Google Calendar"):
+        service.list_events(UUID(int=3), CalendarEventQuery(), "America/Los_Angeles")
+    assert service.request.call_count == 1
+    assert service.repository.rows == {}
+
+
+@pytest.mark.parametrize("query", [
+    {"start": "2030-11-17T00:00:00-08:00"},
+    {"start": "2030-11-17T00:00:00", "end": "2030-11-18T00:00:00"},
+    {"start": "2030-11-17T00:00:00Z", "end": "2031-01-18T00:00:00Z"},
+    {"start": "2030-11-18T00:00:00Z", "end": "2030-11-17T00:00:00Z"},
+    {"calendar_id": "another-users-calendar"},
+])
+def test_calendar_read_ranges_are_bounded_and_cannot_select_another_calendar(query):
+    with pytest.raises(ValidationError):
+        CalendarEventQuery.model_validate(query)
+
+
+def test_chat_reads_actual_events_without_creating_a_proposal(service):
+    from app.errors import DependencyUnavailableError
+    import json
+
+    service.request.side_effect = None
+    service.request.return_value = response(events=[{"summary": "Skating", "start": {"dateTime": "2030-11-17T15:00:00-08:00"}, "end": {"dateTime": "2030-11-17T15:20:00-08:00"}}])
+
+    async def script(number, kwargs, tools):
+        assert "list_calendar_events" in tools
+        assert "Reading never needs approval" in kwargs["extra_instructions"]
+        events = json.loads(await tools["list_calendar_events"].call({}))
+        assert events["events"][0]["summary"] == "Skating"
+        return "Your upcoming event is Skating at 3 PM."
+
+    result = chat(FakeRuntime(script), service, "what are my events?")
+    assert "Skating" in result.response and result.calendar_proposals == []
+    assert service.repository.rows == {}
+
+
 def test_proposing_editing_and_cancelling_never_write_google(service):
     proposal = service.propose(USER, draft())
     changed = draft().model_copy(update={"title": "Revised study session"})
@@ -164,7 +214,7 @@ def test_lost_response_retries_same_id_and_recovers_existing_event(service):
 
 def test_busy_slot_requires_edit_and_new_approval_without_writing(service):
     proposal = service.propose(USER, draft())
-    service.request.side_effect = [response(404), response(calendars={"primary": {"busy": [{"start": "busy"}]}})]
+    service.request.side_effect = [response(404), response(calendars={"primary": {"busy": [{"start": proposal.event.start.isoformat(), "end": proposal.event.end.isoformat()}]}})]
     with pytest.raises(AppError, match="overlaps"):
         service.approve(USER, proposal.id, 1)
     assert service.repository.rows[proposal.id]["status"] == "pending"
@@ -261,7 +311,7 @@ def chat(runtime, service, content="Add a study session", **request):
 
 def test_chat_tool_only_drafts_and_has_no_approval_tool(service):
     async def script(number, kwargs, tools):
-        assert set(tools) == {"propose_calendar_event"}
+        assert set(tools) == {"propose_calendar_event", "list_calendar_events", "propose_calendar_update"}
         assert "Chat replies including 'yes' cannot approve" in kwargs["extra_instructions"]
         assert "nothing was added" in await tools["propose_calendar_event"].call(draft().model_dump(mode="json"))
         return "Review the proposal."
@@ -323,7 +373,7 @@ def test_followup_recovers_missing_draft_call_and_returns_a_new_approval_card(se
             return "I've drafted a second calendar event for you. A proposal card should now appear."
         # The retry gets only the calendar tools, no MCP or connector tools.
         assert kwargs["include_goal_tools"] is False
-        assert set(tools) == {"propose_calendar_event", "ask_calendar_details"}
+        assert set(tools) == {"propose_calendar_event", "list_calendar_events", "propose_calendar_update", "ask_calendar_details"}
         assert "No valid draft has been saved" in kwargs["extra_instructions"]
         await tools["propose_calendar_event"].call(second_event.model_dump(mode="json"))
         return "Review the second event."

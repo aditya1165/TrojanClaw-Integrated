@@ -36,6 +36,8 @@ export interface CalendarEventDraft {
   timezone: string;
   description: string;
   location: string;
+  recurrence?: { frequency: "DAILY" | "WEEKLY" | "MONTHLY"; interval: number; weekdays: string[]; count: number | null; until: string | null } | null;
+  reminder_minutes?: number | null;
 }
 
 export interface CalendarProposal {
@@ -46,6 +48,12 @@ export interface CalendarProposal {
   status: "pending" | "approved" | "applied" | "cancelled";
   expires_at: string;
   event_url: string | null;
+  operation?: "create" | "update";
+  scope?: "event" | "series";
+  before?: { summary?: string; start?: { dateTime?: string }; end?: { dateTime?: string }; location?: string; description?: string; recurrence?: string[]; reminders?: object } | null;
+  occurrences?: { start: string; end: string }[];
+  recurrence_changed?: boolean;
+  reminder_changed?: boolean;
 }
 
 export interface CalendarStatus {

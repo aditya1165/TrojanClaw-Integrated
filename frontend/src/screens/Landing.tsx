@@ -47,7 +47,7 @@ export default function Landing({ theme, onToggleTheme, onSignIn, onCreateAccoun
           </div>
           <p className="inline-flex items-center gap-1.5 text-[13px] text-muted">
             <LockIcon />
-            Academic sources are read-only. Calendar additions always need your approval.
+            Academic sources are read-only. Calendar changes always need your approval.
           </p>
           <button type="button" onClick={onHowItWorks} className="min-h-11 text-sm font-medium text-accent-fg hover:underline">
             See how it works

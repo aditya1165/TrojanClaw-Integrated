@@ -9,7 +9,7 @@ An AI academic copilot for USC students, built on Claude, MCP, FastAPI, React an
   - Replies stream in word by word. While TrojanClaw looks something up, a status line shows what it is checking, for example "Checking Brightspace: upcoming due dates".
   - Links the reply relied on appear as chips under it, such as "Brightspace · ASN-04". A link is shown only if a tool returned it and the reply cites it.
 - **Multiple chats**, like Claude: saved per account, each with its own address (`/chat/<id>`), an AI-written title, search, pin, rename and delete.
-- **Google Calendar drafts**: chat can draft one event at a time; nothing is added until the student presses **Approve addition**. Drafts belong to the chat that made them. See [docs/google-calendar.md](docs/google-calendar.md).
+- **Google Calendar**: chat can read the student's events, and draft one new event or one change to an existing event (including repeating events and reminders) at a time. Nothing changes in Google Calendar until the student approves the card. Drafts belong to the chat that made them. See [docs/google-calendar.md](docs/google-calendar.md).
 - **Sources**: the **Sources** button in the chat box turns sources on or off for chat; **Sources** in the sidebar connects, reconnects and checks them. If USC signs the student out of a source, a banner offers **Reconnect**.
 - **Settings** (gear beside the name in the sidebar): light or dark theme, time zone, default sources, keyboard shortcuts, sign out.
 - **Keyboard shortcuts**: ⌘K new chat, ⌘/ type a message, ⌘⇧F search chats, Esc closes a window. Use Ctrl on Windows.

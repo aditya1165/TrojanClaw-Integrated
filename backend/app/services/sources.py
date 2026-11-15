@@ -18,6 +18,8 @@ TOOL_ACTIVITY = {
     "list_campus_events": "Checking campus events",
     "get_data_status": "Checking your synced data",
     "propose_calendar_event": "Drafting a calendar event",
+    "list_calendar_events": "Checking your Google Calendar",
+    "propose_calendar_update": "Drafting a calendar change",
     "ask_calendar_details": "Checking the event details",
 }
 
