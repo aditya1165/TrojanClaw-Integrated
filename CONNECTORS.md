@@ -36,6 +36,13 @@ npm run dev -- --host 127.0.0.1
 
 Open `http://127.0.0.1:5173`. The first Brightspace tool call may download the pinned `brightspace-mcp-server@5.2.3` through npx. Internet access is needed. The backend also recognizes a project-local Node installation under `.runtime/node-*-win-x64` if one is present.
 
+The frontend uses `/api`; Vite proxies it to `127.0.0.1:8000`. Keep
+`VITE_API_BASE_URL=/api` if you create a frontend `.env`. Mixing a frontend at
+`127.0.0.1` with direct API calls to `localhost` can make the browser reject or
+omit the HttpOnly sign-in cookie, causing 401 responses immediately after login.
+Restart Vite after changing environment settings. Google OAuth additionally
+requires its configured frontend/callback URLs to use matching hostnames.
+
 ## Sign in with USC (one login for everything)
 
 The sign-in dialog also offers **Continue with USC Google** when Calendar OAuth

@@ -64,6 +64,6 @@ uvicorn app.main:app --reload
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-Open the app at **http://127.0.0.1:5173**. Use `127.0.0.1` everywhere (frontend URL, `VITE_API_BASE_URL`, Google redirect URIs), never a mix with `localhost`: the browser keeps cookies per host, so mixing them breaks Google sign-in with "This Google sign-in expired".
+Open the app at **http://127.0.0.1:5173**. The frontend calls the API at `/api`, and Vite forwards it to `127.0.0.1:8000` (`frontend/vite.config.ts`), so the browser sees one host and sign-in cookies work; keep `VITE_API_BASE_URL=/api`. Google redirect URIs and `GOOGLE_CALENDAR_FRONTEND_URL` must also use `127.0.0.1`, not `localhost`: the browser keeps cookies per host, so mixing them breaks Google sign-in with "This Google sign-in expired".
 
 Apply every file in `supabase/migrations/` in order. The newest ones add saved chats' calendar drafts (`20261121000000`) and pinned chats (`20261122000000`).

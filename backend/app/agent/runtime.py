@@ -191,8 +191,10 @@ def _provider(status: Any) -> str:
 
 def _now_line(timezone: str) -> str:
     now = datetime.now(ZoneInfo(timezone))
+    # Windows does not support strftime's %-d / %-I padding modifiers.
+    display = f"{now:%A, %B} {now.day}, {now.year}, {now.hour % 12 or 12}:{now:%M %p}"
     return (
-        f"Current date and time: {now:%A, %B %-d, %Y, %-I:%M %p} ({now.isoformat(timespec='minutes')}). "
+        f"Current date and time: {display} ({now.isoformat(timespec='minutes')}). "
         f"The student's time zone: {timezone}."
     )
 

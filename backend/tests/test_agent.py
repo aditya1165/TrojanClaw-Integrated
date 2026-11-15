@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime
 import json
 from types import SimpleNamespace
 from uuid import UUID
@@ -11,7 +12,7 @@ import pytest
 from mcp import Client
 
 from app.agent.config import RetrievalConfig, load_agent_config
-from app.agent.runtime import _dedupe, _RecordingClient
+from app.agent.runtime import _dedupe, _RecordingClient, _now_line
 from app.config import ConfigurationError, get_settings
 from app.errors import DependencyUnavailableError
 from app.mcp_server.server import build_mcp_server
@@ -21,6 +22,30 @@ from app.repositories.student_data import _course_pattern
 from app.services.embeddings import EmbeddingService
 
 USER = UUID("00000000-0000-0000-0000-000000000001")
+
+
+@pytest.mark.parametrize('instant,timezone,display,iso', [
+    ('2026-01-02T08:05:00+00:00', 'America/Los_Angeles', 'January 2, 2026, 12:05 AM', '2026-01-02T00:05-08:00'),
+    ('2026-01-02T20:05:00+00:00', 'America/Los_Angeles', 'January 2, 2026, 12:05 PM', '2026-01-02T12:05-08:00'),
+    ('2026-07-02T07:05:00+00:00', 'America/Los_Angeles', 'July 2, 2026, 12:05 AM', '2026-07-02T00:05-07:00'),
+    ('2026-01-02T20:05:00+00:00', 'Asia/Kolkata', 'January 3, 2026, 1:35 AM', '2026-01-03T01:35+05:30'),
+])
+def test_agent_clock_formats_dates_on_windows_and_preserves_user_timezone(monkeypatch, instant, timezone, display, iso):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime.fromisoformat(instant).astimezone(tz)
+            return cls.fromtimestamp(value.timestamp(), tz)
+
+        def __format__(self, spec):
+            if '%-' in spec:
+                raise ValueError('Invalid format string')
+            return super().__format__(spec)
+
+    monkeypatch.setattr('app.agent.runtime.datetime', FrozenDateTime)
+    result = _now_line(timezone)
+    assert display in result and f'({iso})' in result
+    assert f"The student's time zone: {timezone}." in result
 
 
 # --- Embeddings --------------------------------------------------------------
