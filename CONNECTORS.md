@@ -101,7 +101,7 @@ Chat runs one Claude agent (`backend/app/agent/runtime.py`, configured in `confi
 
 - **Google Calendar draft tool** (`propose_calendar_event`), when Google Calendar is configured. It only creates a proposal card; the event is saved only when the student clicks Approve (see [Google Calendar setup](docs/google-calendar.md)). Each reply can create at most one card, and a draft whose times don't match an explicit time range in the latest message (such as "3pm to 3.20pm") is rejected. If Claude says it drafted an event without calling the tool, or its draft was rejected, chat retries once with only the calendar tools, and otherwise asks the student for the missing details.
 
-Claude decides which tools a question needs. The prompt tells it to prefer the live connector tools for the student's own Brightspace and Handshake data, to look up IDs (courses, jobs) before details, and to send the student to the connector card when a session has expired.
+Claude decides which tools a question needs. The prompt tells it to prefer the live connector tools for the student's own Brightspace and Handshake data, to look up IDs (courses, jobs) before details, and to send the student to Sources (or the Reconnect banner) when a session has expired.
 
 To avoid reconnecting on every question:
 
