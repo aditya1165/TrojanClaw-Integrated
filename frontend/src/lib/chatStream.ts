@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "./api";
-import type { CalendarProposal, ChatResponse, ChatSaved, ConversationMessage, Source } from "./api";
+import type { Attachment, CalendarProposal, ChatResponse, ChatSaved, ConversationMessage, Source } from "./api";
 
 export interface ChatItem {
   id: string;
   role: "user" | "assistant";
   content: string;
   sources: Source[];
+  attachments: Attachment[];
 }
 
 export type ChatStatus = "ready" | "submitted" | "streaming" | "error";
@@ -20,14 +21,15 @@ type StreamEvent =
 
 export const fromSaved = (message: ConversationMessage): ChatItem => ({
   id: message.id, role: message.role, content: message.content, sources: message.sources ?? [],
+  attachments: message.attachments ?? [],
 });
 
 /**
  * One chat's messages and the reply being written. The server streams
  * newline-delimited JSON events (see backend/app/api/routes/chat.py).
- * `body` builds the request for a new message.
+ * `body` builds the request for a new message and its attached files.
  */
-export function useChatStream(initial: ChatItem[], body: (message: string) => object) {
+export function useChatStream(initial: ChatItem[], body: (message: string, attachments: Attachment[]) => object) {
   const [messages, setMessages] = useState(initial);
   const [status, setStatus] = useState<ChatStatus>("ready");
   const [activity, setActivity] = useState("");
@@ -42,19 +44,19 @@ export function useChatStream(initial: ChatItem[], body: (message: string) => ob
   }, []);
   useEffect(() => () => controller.current?.abort(), []);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, attachments: Attachment[] = []) => {
     const question = text.trim();
     if (!question || controller.current) return;
     const replyId = `reply-${crypto.randomUUID()}`;
     const setReply = (update: (reply: ChatItem) => ChatItem) => setMessages((current) => {
       const index = current.findIndex((item) => item.id === replyId);
-      if (index === -1) return [...current, update({ id: replyId, role: "assistant", content: "", sources: [] })];
+      if (index === -1) return [...current, update({ id: replyId, role: "assistant", content: "", sources: [], attachments: [] })];
       const next = current.slice();
       next[index] = update(current[index]);
       return next;
     });
 
-    setMessages((current) => [...current, { id: `user-${crypto.randomUUID()}`, role: "user", content: question, sources: [] }]);
+    setMessages((current) => [...current, { id: `user-${crypto.randomUUID()}`, role: "user", content: question, sources: [], attachments }]);
     setStatus("submitted");
     setActivity("");
     setError("");
@@ -67,7 +69,7 @@ export function useChatStream(initial: ChatItem[], body: (message: string) => ob
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(latest.current.body(question)),
+        body: JSON.stringify(latest.current.body(question, attachments)),
         signal: abort.signal,
       });
       if (!response.ok || !response.body) {
@@ -126,7 +128,7 @@ export function useChatStream(initial: ChatItem[], body: (message: string) => ob
     const index = items.map((item) => item.role).lastIndexOf("user");
     if (index === -1) return;
     setMessages(items.slice(0, index));
-    void send(items[index].content);
+    void send(items[index].content, items[index].attachments);
   }, [send]);
 
   return { messages, status, activity, error, send, stop, retry };

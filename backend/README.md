@@ -277,6 +277,15 @@ otherwise the reply just names the sources it checked.
 - `POST /conversations/{id}/rename` with `{title}`
 - `POST /conversations/{id}/delete`: also deletes that chat's calendar drafts
 
+### Attached files
+
+- `POST /uploads` (multipart, field `file`): checks the type by extension **and** contents (PDF, PNG, JPEG, GIF, WebP, UTF-8 text and code, DOCX, PPTX, XLSX; no SVG or other active content), refuses files over 5 MB, and stores the file in the private `chat-uploads` bucket at `<account id>/<upload id>/<file name>`. Returns `{id, name, mime, size, kind}`.
+- `GET /uploads/{id}`: downloads one of the signed-in account's own files (always as a download, `nosniff`).
+- `POST /chat` takes `attachments: [upload ids]` (up to 5). Each must belong to the signed-in account. PDFs and images are sent to Claude as document and image blocks; text as a text document; Word, PowerPoint and Excel as extracted text (`python-docx`, `python-pptx`, `openpyxl`). The IDs are saved with the message, so later messages in the chat include earlier files again, newest first, up to 18 MB in total (a Claude request is limited to 32 MB); older ones are replaced by a note asking the student to attach them again.
+- Deleting a chat deletes its files. Uploads that were never sent stay in the bucket.
+
+The bucket has no storage policies, so browser keys can't reach it; the backend uses `SUPABASE_SECRET_KEY` (Supabase Dashboard → Project Settings → API Keys → Secret keys). Migration: `20261123000000_chat_uploads_bucket.sql`.
+
 Calendar drafts belong to the chat that created them
 (`calendar_proposals.conversation_id`, migration `20261121000000`);
 `GET /calendar/proposals?conversation_id=` lists one chat's drafts. A chat

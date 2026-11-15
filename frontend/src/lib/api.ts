@@ -15,12 +15,22 @@ export interface Source {
   kind: string | null;
 }
 
+/** A file attached to a chat message (kept in the private Supabase bucket). */
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "pdf" | "image" | "text" | "docx" | "pptx" | "xlsx";
+}
+
 export interface ConversationMessage {
   id: string;
   role: ChatRole;
   content: string;
   created_at: string;
   sources: Source[];
+  attachments: Attachment[];
 }
 
 /** Sent after each reply is saved, so the chat list can update. */
@@ -154,3 +164,21 @@ export const renameConversation = (id: string, title: string) =>
   apiRequest<ConversationSummary>(`/conversations/${encodeURIComponent(id)}/rename`, { title });
 export const deleteConversation = (id: string) =>
   apiRequest<void>(`/conversations/${encodeURIComponent(id)}/delete`, {});
+
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 5;
+export const UPLOAD_ACCEPT = ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.json,.py,.js,.ts,.java,.c,.cpp,.html,.css,.sql,.docx,.pptx,.xlsx";
+export const uploadUrl = (id: string) => `${API_BASE_URL}/uploads/${encodeURIComponent(id)}`;
+
+/** Upload one file for the next chat message. */
+export async function uploadFile(file: File): Promise<Attachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/uploads`, { method: "POST", body: form, credentials: "include" });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("auth-expired"));
+    const data = await response.json().catch(() => ({})) as { detail?: unknown };
+    throw new ApiError(typeof data.detail === "string" ? data.detail : "Couldn't upload this file.", response.status);
+  }
+  return response.json();
+}

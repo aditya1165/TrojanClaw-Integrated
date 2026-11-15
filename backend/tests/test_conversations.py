@@ -54,11 +54,12 @@ class FakeConversations:
         items = self.messages_by_chat[UUID(str(conversation_id))]
         return [dict(m) for m in (items[-limit:] if limit else items)]
 
-    def add_turn(self, user_id, conversation_id, question, answer, sources=None):
+    def add_turn(self, user_id, conversation_id, question, answer, sources=None, attachments=None):
         self._owned(user_id, conversation_id)
-        for role, text, items in (("user", question, []), ("assistant", answer, sources or [])):
+        for role, text, items, files in (("user", question, [], attachments or []), ("assistant", answer, sources or [], [])):
             self.messages_by_chat[conversation_id].append(
-                {"id": uuid4(), "role": role, "content": text, "sources": items, "created_at": datetime.now(timezone.utc)})
+                {"id": uuid4(), "role": role, "content": text, "sources": items, "attachments": files,
+                 "created_at": datetime.now(timezone.utc)})
 
     def rename(self, user_id, conversation_id, title):
         chat = self._owned(user_id, conversation_id)

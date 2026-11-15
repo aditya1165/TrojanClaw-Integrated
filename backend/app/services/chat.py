@@ -98,7 +98,10 @@ class ChatService:
         """`conversation_id` ties calendar drafts to the saved chat. `emit`, when given,
         receives progress as the reply streams (see AgentRuntime.run). `allowed_connectors`
         is the sources the student turned on; saved sessions of other connectors are not used."""
-        messages = [{"role": message.role.value, "content": message.content} for message in request.messages]
+        # Attached files go before the text of the message they came with.
+        messages = [{"role": message.role.value,
+                     "content": message.blocks + [{"type": "text", "text": message.content}] if message.blocks else message.content}
+                    for message in request.messages]
         calendar = self._calendar if self._calendar is not None and self._calendar.configured else None
         proposals: list[CalendarProposal] = []
         questions: list[str] = []

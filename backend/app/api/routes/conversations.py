@@ -1,5 +1,6 @@
 """Saved chats: list, open, rename and delete. Sending messages is POST /chat."""
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -8,7 +9,9 @@ from app.api.routes.auth import get_current_user, require_trusted_origin
 from app.dependencies import get_conversation_repository
 from app.models.auth import AccountProfile
 from app.models.chat import ConversationMessage, ConversationSummary, PinConversation, RenameConversation
+from app.errors import AppError
 from app.repositories.conversations import ConversationRepository
+from app.services.uploads import UploadStore, get_upload_store
 
 
 def no_cache(response: Response):
@@ -44,5 +47,16 @@ def pin(conversation_id: UUID, payload: PinConversation, user: AccountProfile = 
 
 @router.post("/{conversation_id}/delete", status_code=204, dependencies=[Depends(require_trusted_origin)])
 def delete(conversation_id: UUID, user: AccountProfile = Depends(get_current_user),
-           conversations: ConversationRepository = Depends(get_conversation_repository)):
+           conversations: ConversationRepository = Depends(get_conversation_repository),
+           store: UploadStore = Depends(get_upload_store)):
+    try:
+        files = [UUID(str(item["id"])) for message in conversations.messages(user.id, conversation_id)
+                 for item in message.get("attachments") or []]
+    except AppError:
+        files = []  # not this account's chat: nothing to delete
     conversations.delete(user.id, conversation_id)
+    if files:
+        try:
+            store.delete(user.id, files)  # the chat's attached files go with it
+        except Exception:
+            logging.getLogger(__name__).warning("Could not delete a deleted chat's files", exc_info=True)

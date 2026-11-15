@@ -145,3 +145,6 @@ export const SearchIcon = () => <svg {...stroke} width={16} height={16}><circle 
 export const PinIcon = () => <svg {...stroke} width={14} height={14}><path d="M12 17v5M9 3h6l-1 7 4 3v2H6v-2l4-3z" /></svg>;
 export const ExternalIcon = () => <svg {...stroke} width={12} height={12}><path d="M14 4h6v6M20 4 10 14M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>;
 export const CopyIcon = () => <svg {...stroke} width={14} height={14}><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>;
+export const PaperclipIcon = () => <svg {...stroke}><path d="m21 11-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" /></svg>;
+export const MicIcon = () => <svg {...stroke}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>;
+export const FileIcon = () => <svg {...stroke} width={14} height={14}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>;

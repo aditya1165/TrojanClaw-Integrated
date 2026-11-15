@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -18,6 +19,8 @@ class ChatMessage(BaseModel):
 
     role: ChatRole
     content: str = Field(min_length=1, max_length=20_000)
+    # Claude content blocks sent before the text: attached files (PDF, image, document text).
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("content")
     @classmethod
@@ -83,6 +86,7 @@ class ChatTurn(BaseModel):
 
     conversation_id: UUID | None = None  # None starts a new chat
     message: str = Field(min_length=1, max_length=20_000)
+    attachments: list[UUID] = Field(default_factory=list, max_length=5)  # IDs from POST /uploads
     connectors: list[str] = Field(default_factory=list, max_length=3)
     timezone: str = Field(default="America/Los_Angeles", max_length=100)
 
@@ -111,12 +115,21 @@ class ConversationSummary(BaseModel):
     pinned: bool = False
 
 
+class Attachment(BaseModel):
+    id: UUID
+    name: str
+    mime: str
+    size: int
+    kind: str
+
+
 class ConversationMessage(BaseModel):
     id: UUID
     role: ChatRole
     content: str
     created_at: datetime
     sources: list[Source] = Field(default_factory=list)
+    attachments: list[Attachment] = Field(default_factory=list)
 
 
 class PinConversation(BaseModel):

@@ -27,6 +27,7 @@ from app.models.auth import AccountProfile
 from app.models.chat import ChatMessage, ChatRequest, ChatTurn
 from app.repositories.conversations import HISTORY_LIMIT, ConversationRepository
 from app.services.chat import ChatService
+from app.services.uploads import CONTEXT_BUDGET, Upload, UploadStore, content_block, get_upload_store
 
 
 router = APIRouter(tags=["chat"])
@@ -39,6 +40,40 @@ def first_line_title(message: str) -> str:
     """Shown until the AI-written title arrives (or if it cannot be made)."""
     text = " ".join(message.split())
     return text if len(text) <= 60 else text[:57].rstrip() + "…"
+
+
+def _omitted(name: str) -> dict[str, Any]:
+    return {"type": "text", "text": f"[The earlier attachment \"{name}\" is not included in this message. "
+                                    "If you need it, ask the student to attach it again.]"}
+
+
+async def _attachment_blocks(store: UploadStore, user_id: UUID, new: list[UUID],
+                             history: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[Upload], list[list[dict[str, Any]]]]:
+    """Content blocks for this message's files and for earlier ones, newest first, within CONTEXT_BUDGET.
+
+    Returns (blocks for the new message, the new uploads, blocks for each history item)."""
+    budget = CONTEXT_BUDGET
+    uploads, new_blocks = [], []
+    for upload_id in dict.fromkeys(new):  # each must be the signed-in account's own file
+        upload, data = await asyncio.to_thread(store.read, user_id, upload_id)
+        budget -= len(data)
+        uploads.append(upload)
+        new_blocks.append(await asyncio.to_thread(content_block, upload, data))
+    if budget < 0:
+        raise HTTPException(413, "These files are too large to send together. Attach fewer files.")
+    history_blocks: list[list[dict[str, Any]]] = [[] for _ in history]
+    for index in range(len(history) - 1, -1, -1):
+        for item in history[index].get("attachments") or []:
+            size = int(item.get("size") or 0)
+            try:
+                if size > budget:
+                    raise LookupError
+                upload, data = await asyncio.to_thread(store.read, user_id, UUID(str(item["id"])))
+                history_blocks[index].append(await asyncio.to_thread(content_block, upload, data))
+                budget -= len(data)
+            except (LookupError, AppError, ValueError, KeyError):
+                history_blocks[index].append(_omitted(str(item.get("name") or "file")))
+    return new_blocks, uploads, history_blocks
 
 
 def _is_local(http_request: Request) -> bool:
@@ -65,6 +100,7 @@ async def chat(
     http_request: Request,
     service: ChatService = Depends(get_chat_service),
     conversations: ConversationRepository = Depends(get_conversation_repository),
+    store: UploadStore = Depends(get_upload_store),
     user: AccountProfile = Depends(get_current_user),
 ) -> StreamingResponse:
     if turn.connectors:
@@ -76,10 +112,13 @@ async def chat(
         if turn.conversation_id else []
     while history and history[0]["role"] != "user":  # the model expects the user to speak first
         history.pop(0)
+    history = [item for item in history if item["content"].strip()]
+    new_blocks, uploads, history_blocks = await _attachment_blocks(store, user.id, turn.attachments, history)
     try:
         request = ChatRequest(
-            messages=[ChatMessage(role=item["role"], content=item["content"][:20_000]) for item in history if item["content"].strip()]
-            + [ChatMessage(role="user", content=turn.message)],
+            messages=[ChatMessage(role=item["role"], content=item["content"][:20_000], blocks=blocks)
+                      for item, blocks in zip(history, history_blocks)]
+            + [ChatMessage(role="user", content=turn.message, blocks=new_blocks)],
             # The sources turned on in chat limit which saved sessions are used (below); none is forced,
             # so an expired session is skipped instead of failing the reply.
             connectors=[], timezone=turn.timezone,
@@ -99,7 +138,8 @@ async def chat(
                                           conversation_id=conversation["id"], emit=events.put_nowait,
                                           allowed_connectors=turn.connectors)
             await asyncio.to_thread(conversations.add_turn, user.id, conversation["id"], turn.message,
-                                    response.response, [source.model_dump() for source in response.sources])
+                                    response.response, [source.model_dump() for source in response.sources],
+                                    [upload.summary() for upload in uploads])
             saved = True
             response.conversation_id, response.title = UUID(str(conversation["id"])), conversation["title"]
             events.put_nowait({"type": "done", **response.model_dump(mode="json")})

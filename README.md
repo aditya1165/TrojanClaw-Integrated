@@ -8,6 +8,8 @@ An AI academic copilot for USC students, built on Claude, MCP, FastAPI, React an
 - **Chat** runs one Claude agent (`config/agent.yaml`, `prompts/ai_instructions.md`) with live, read-only tools for Brightspace, Handshake and Piazza, plus TrojanClaw's own tools for deadlines, announcements, course materials, USC documents and public campus events (EngageSC). Piazza has its own sign-in; see [docs/piazza.md](docs/piazza.md).
   - Replies stream in word by word. While TrojanClaw looks something up, a status line shows what it is checking, for example "Checking Brightspace: upcoming due dates".
   - Links the reply relied on appear as chips under it, such as "Brightspace · ASN-04". A link is shown only if a tool returned it and the reply cites it.
+- **Attach files** (📎, drag-and-drop or paste): PDF, images, text and code, Word, PowerPoint and Excel; up to 5 files of 5 MB each per message. PDFs and images go to Claude as they are; Word, PowerPoint and Excel as their text. Files are kept in a private Supabase Storage bucket (`chat-uploads`) and stay with the chat; deleting the chat deletes them. Needs `SUPABASE_SECRET_KEY` in `backend/.env`.
+- **Voice input** (🎤): the browser's built-in speech recognition types what you say into the message box. Works in Chrome, Edge and Safari (the button is hidden in Firefox); Chrome sends the audio to Google to recognise it.
 - **Multiple chats**, like Claude: saved per account, each with its own address (`/chat/<id>`), an AI-written title, search, pin, rename and delete.
 - **Google Calendar**: chat can read the student's events, and draft one new event or one change to an existing event (including repeating events and reminders) at a time. Nothing changes in Google Calendar until the student approves the card. Drafts belong to the chat that made them. See [docs/google-calendar.md](docs/google-calendar.md).
 - **Sources**: the **Sources** button in the chat box turns sources on or off for chat; **Sources** in the sidebar connects, reconnects and checks them. If USC signs the student out of a source, a banner offers **Reconnect**.
@@ -60,10 +62,18 @@ pip install -r requirements-dev.txt
 cp .env.example .env   # fill in DATABASE_URL, SUPABASE_URL, SUPABASE_KEY, API keys
 uvicorn app.main:app --reload
 
+# Connectors (once per checkout; needs uv and Node 22+)
+uv sync --locked --project integrations/handshake
+uv sync --locked --project integrations/piazza --python 3.12
+uv run --locked --project integrations/handshake patchright install chromium
+npm ci --prefix integrations/google-calendar
+
 # Frontend
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
+If a source never opens a sign-in window, its helper isn't installed: the Sources menu shows "Install the local connectors first". If Google Calendar says "Install the Google Calendar connector dependencies first", run the `npm ci` line above.
+
 Open the app at **http://127.0.0.1:5173**. The frontend calls the API at `/api`, and Vite forwards it to `127.0.0.1:8000` (`frontend/vite.config.ts`), so the browser sees one host and sign-in cookies work; keep `VITE_API_BASE_URL=/api`. Google redirect URIs and `GOOGLE_CALENDAR_FRONTEND_URL` must also use `127.0.0.1`, not `localhost`: the browser keeps cookies per host, so mixing them breaks Google sign-in with "This Google sign-in expired".
 
-Apply every file in `supabase/migrations/` in order. The newest ones add saved chats' calendar drafts (`20261121000000`) and pinned chats (`20261122000000`).
+Apply every file in `supabase/migrations/` in order. The newest ones add saved chats' calendar drafts (`20261121000000`), pinned chats (`20261122000000`) and the private `chat-uploads` Storage bucket (`20261123000000`).

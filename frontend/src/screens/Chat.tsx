@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  deleteConversation, getConversationMessages, listConversations, pinConversation, renameConversation,
+  deleteConversation, getConversationMessages, listConversations, MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, pinConversation,
+  renameConversation, UPLOAD_ACCEPT, uploadFile, uploadUrl,
 } from "../lib/api";
-import type { AccountProfile, ChatSaved, ConnectorProvider, ConversationSummary, Source } from "../lib/api";
+import type { AccountProfile, Attachment, ChatSaved, ConnectorProvider, ConversationSummary, Source } from "../lib/api";
+import { speechSupported, useSpeech } from "../lib/speech";
 import { fromSaved, useChatStream, type ChatItem } from "../lib/chatStream";
 import { effectiveTimezone, readSettings, saveSettings, SIDEBAR, useSettings } from "../lib/settings";
 import { activeSources, INFO, LIVE, useSources, type Sources } from "../lib/sources";
@@ -15,7 +17,8 @@ import SettingsDialog from "../components/SettingsDialog";
 import { SourcesDialog, SourcesMenu } from "../components/Sources";
 import type { Theme } from "../theme";
 import {
-  ArrowUpIcon, Button, CloseIcon, ExternalIcon, GearIcon, Logo, MenuIcon, PlusIcon, StopIcon, ThemeToggle,
+  ArrowUpIcon, Button, CloseIcon, ExternalIcon, FileIcon, GearIcon, Logo, MenuIcon, MicIcon, PaperclipIcon, PlusIcon,
+  StopIcon, ThemeToggle,
 } from "../components/ui";
 
 // Each saved chat has its own address, so refresh and back/forward keep your place.
@@ -300,16 +303,40 @@ interface ChatThreadProps {
 function ChatThread({ conversationId, initialMessages, sources, selectedConnectors, onConnectorsChange, onManageSources, signingOut }: ChatThreadProps) {
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
+  const [files, setFiles] = useState<PendingFile[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const sourceNames = activeSources(sources, selectedConnectors);
   const timezone = effectiveTimezone(useSettings());
+  const speech = useSpeech(setInput, (message) => toast(message, "error"));
 
-  // The server keeps the history; send only the new message and which chat it belongs to.
-  const { messages, status, activity, error, send, stop, retry } = useChatStream(initialMessages, (message) => ({
+  // The server keeps the history; send only the new message, its files and which chat it belongs to.
+  const { messages, status, activity, error, send, stop, retry } = useChatStream(initialMessages, (message, attachments) => ({
     conversation_id: conversationId,
     message,
+    attachments: attachments.map((file) => file.id),
     connectors: selectedConnectors,
     timezone,
   }));
+
+  // Upload each picked, dropped or pasted file straight away, so sending is instant.
+  const addFiles = (picked: File[]) => {
+    const room = MAX_ATTACHMENTS - files.length;
+    if (picked.length > room) toast(`You can attach up to ${MAX_ATTACHMENTS} files to a message.`, "error");
+    for (const file of picked.slice(0, Math.max(room, 0))) {
+      const key = crypto.randomUUID();
+      if (file.size > MAX_UPLOAD_BYTES) {
+        toast(`"${file.name}" is larger than 5 MB.`, "error");
+        continue;
+      }
+      setFiles((current) => [...current, { key, name: file.name, size: file.size, state: "uploading" }]);
+      uploadFile(file)
+        .then((attachment) => setFiles((current) => current.map((item) => item.key === key ? { ...item, state: "ready", attachment } : item)))
+        .catch((reason: Error) => setFiles((current) => current.map((item) => item.key === key ? { ...item, state: "error", error: reason.message } : item)));
+    }
+  };
+  const uploading = files.some((file) => file.state === "uploading");
+  const ready = files.flatMap((file) => file.state === "ready" && file.attachment ? [file.attachment] : []);
 
   const isLoading = status === "submitted" || status === "streaming";
   const last = messages[messages.length - 1];
@@ -324,11 +351,14 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
     if (window.matchMedia("(min-width: 768px)").matches) focusComposer();
   }, []);
 
+  const canSend = (input.trim() || ready.length > 0) && !uploading && !isLoading && !signingOut;
   const submit = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
-    if (!input.trim() || isLoading || signingOut) return;
-    void send(input);
+    if (!canSend) return;
+    if (speech.listening) speech.stop();
+    void send(input.trim() || `Please look at the attached file${ready.length > 1 ? "s" : ""}.`, ready);
     setInput("");
+    setFiles([]);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -352,9 +382,20 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
 
           {messages.map((message) =>
             message.role === "user" ? (
-              <div key={message.id}
-                className="max-w-[80%] self-end rounded-2xl bg-subtle px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
-                {message.content}
+              <div key={message.id} className="flex max-w-[80%] flex-col items-end gap-1.5 self-end">
+                {message.attachments.length > 0 && (
+                  <ul aria-label="Attached files" className="flex flex-wrap justify-end gap-1.5">
+                    {message.attachments.map((file) => (
+                      <li key={file.id}>
+                        <a href={uploadUrl(file.id)} download={file.name}
+                          className="inline-flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs text-muted hover:text-fg">
+                          <FileIcon /><span className="truncate">{file.name}</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="rounded-2xl bg-subtle px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
               </div>
             ) : message.content ? (
               <article key={message.id} className="flex flex-col gap-3">
@@ -389,12 +430,47 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
 
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2.5 px-4 pb-4 sm:px-6 sm:pb-5">
         <form onSubmit={submit}
-          className="flex flex-col gap-2 rounded-2xl border border-line bg-surface py-3 pr-3 pl-4 focus-within:border-muted">
+          onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles([...event.dataTransfer.files]); }}
+          className={`flex flex-col gap-2 rounded-2xl border bg-surface py-3 pr-3 pl-4 focus-within:border-muted ${dragging ? "border-accent-fg border-dashed" : "border-line"}`}>
+          {files.length > 0 && (
+            <ul aria-label="Files to send" className="flex flex-wrap gap-2">
+              {files.map((file) => (
+                <li key={file.key} title={file.error}
+                  className={`flex max-w-[15rem] items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs ${file.state === "error" ? "border-error/40 bg-error-soft text-error" : "border-line bg-subtle text-fg"}`}>
+                  {file.state === "uploading"
+                    ? <span className="h-3 w-3 flex-none animate-spin rounded-full border-2 border-line border-t-accent-fg" aria-label="Uploading" />
+                    : <FileIcon />}
+                  <span className="min-w-0 flex-1 truncate">{file.state === "error" ? `${file.name}: ${file.error}` : file.name}</span>
+                  <span className="flex-none text-muted">{formatSize(file.size)}</span>
+                  <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((item) => item.key !== file.key))}
+                    className="flex h-6 w-6 flex-none items-center justify-center rounded-md text-muted hover:text-fg"><CloseIcon /></button>
+                </li>
+              ))}
+            </ul>
+          )}
           <textarea id="composer" aria-label="Message TrojanClaw" rows={2} value={input} disabled={signingOut}
             onChange={(event) => setInput(event.target.value)} onKeyDown={handleKeyDown}
-            placeholder="Ask about deadlines, courses or campus…"
+            onPaste={(event) => { const pasted = [...event.clipboardData.files]; if (pasted.length) { event.preventDefault(); addFiles(pasted); } }}
+            placeholder={speech.listening ? "Listening… speak now" : "Ask about deadlines, courses or campus…"}
             className="w-full resize-none bg-transparent text-[15px] leading-normal text-fg outline-none placeholder:text-muted" />
           <div className="flex items-center gap-2">
+            <input ref={fileInput} type="file" multiple accept={UPLOAD_ACCEPT} className="hidden"
+              onChange={(event) => { addFiles([...(event.target.files ?? [])]); event.target.value = ""; }} />
+            <button type="button" aria-label="Attach files" title="Attach files (PDF, images, text, Word, PowerPoint, Excel; up to 5 MB each)"
+              onClick={() => fileInput.current?.click()} disabled={files.length >= MAX_ATTACHMENTS || signingOut}
+              className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-line text-muted hover:text-fg disabled:opacity-40">
+              <PaperclipIcon />
+            </button>
+            {speechSupported && (
+              <button type="button" aria-label={speech.listening ? "Stop voice input" : "Voice input"} aria-pressed={speech.listening}
+                title={speech.listening ? "Stop voice input" : "Speak your message"}
+                onClick={() => speech.listening ? speech.stop() : speech.start(input)} disabled={signingOut}
+                className={`flex h-9 w-9 flex-none items-center justify-center rounded-full border ${speech.listening ? "animate-pulse border-accent-fg bg-accent-soft text-accent-fg" : "border-line text-muted hover:text-fg"}`}>
+                <MicIcon />
+              </button>
+            )}
             <SourcesMenu sources={sources} selected={selectedConnectors} onChange={onConnectorsChange} onManage={onManageSources} />
             <span className="min-w-0 flex-1 truncate text-xs text-muted">{sourceNames.join(", ") || "No sources on"}</span>
             {isLoading ? (
@@ -403,7 +479,7 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
                 <StopIcon />
               </button>
             ) : (
-              <button type="submit" disabled={!input.trim() || signingOut} aria-label="Send"
+              <button type="submit" disabled={!canSend} aria-label={uploading ? "Wait for files to upload" : "Send"}
                 className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-accent text-on-accent transition hover:brightness-110 disabled:opacity-40">
                 <ArrowUpIcon />
               </button>
@@ -416,6 +492,13 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
       </div>
     </main>
   );
+}
+
+/** A file picked for the next message: uploading, ready (with its attachment), or failed. */
+interface PendingFile { key: string; name: string; size: number; state: "uploading" | "ready" | "error"; attachment?: Attachment; error?: string }
+
+function formatSize(bytes: number) {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 /** Where the reply came from: links it relied on, or the connectors it checked. */

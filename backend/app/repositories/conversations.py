@@ -22,6 +22,14 @@ def _sources(content) -> list:
     return []
 
 
+def _attachments(content) -> list:
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "attachments" and isinstance(block.get("items"), list):
+                return block["items"]
+    return []
+
+
 def _text(content) -> str:
     """Messages are stored as Anthropic-style content blocks; return their text."""
     if isinstance(content, str):
@@ -73,9 +81,11 @@ class ConversationRepository:
             "SELECT id, role, content, created_at FROM public.conversation_messages WHERE conversation_id = %s "
             "ORDER BY created_at DESC, id DESC LIMIT %s",
             (str(conversation_id), limit or 1000), many=True)
-        return [{**row, "content": _text(row["content"]), "sources": _sources(row["content"])} for row in reversed(rows)]
+        return [{**row, "content": _text(row["content"]), "sources": _sources(row["content"]),
+                 "attachments": _attachments(row["content"])} for row in reversed(rows)]
 
-    def add_turn(self, user_id: UUID, conversation_id: UUID, question: str, answer: str, sources: "list[dict] | None" = None) -> None:
+    def add_turn(self, user_id: UUID, conversation_id: UUID, question: str, answer: str, sources: "list[dict] | None" = None,
+                 attachments: "list[dict] | None" = None) -> None:
         """Save one question and its answer together, so history never has half a turn."""
         with self.database.connection() as connection:
             with connection.cursor() as cursor:
@@ -84,7 +94,8 @@ class ConversationRepository:
                 if cursor.rowcount != 1:
                     raise AppError("This chat was not found. It may have been deleted.", "conversation_not_found", 404)
                 answer_blocks = [{"type": "text", "text": answer}] + ([{"type": "sources", "items": sources}] if sources else [])
-                for offset, (role, blocks) in enumerate((("user", [{"type": "text", "text": question}]), ("assistant", answer_blocks))):
+                question_blocks = [{"type": "text", "text": question}] + ([{"type": "attachments", "items": attachments}] if attachments else [])
+                for offset, (role, blocks) in enumerate((("user", question_blocks), ("assistant", answer_blocks))):
                     cursor.execute(
                         "INSERT INTO public.conversation_messages (conversation_id, role, content, created_at) "
                         "VALUES (%s, %s, %s::jsonb, clock_timestamp() + %s * interval '1 microsecond')",
