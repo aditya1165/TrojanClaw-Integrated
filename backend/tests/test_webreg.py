@@ -99,3 +99,21 @@ def test_status_route_shows_the_signed_in_accounts_snapshot():
         assert client.get("/integrations/webreg").json()["connected"] is False
         save_snapshot(USER, [{"term": "Spring 2027", "courses": []}])
         assert client.get("/integrations/webreg").json()["terms"] == [{"term": "Spring 2027", "courses": 0}]
+
+
+def test_webreg_that_does_not_open_by_itself_is_skipped_quickly():
+    """It must never keep the sign-in window open (e.g. a Cloudflare check or USC asking again)."""
+    import time
+
+    from app.integrations.webreg import read_course_bin
+
+    class StuckPage:
+        url = "https://login.usc.edu/login/login"
+        def goto(self, url, **kwargs): pass
+        def locator(self, selector): raise AssertionError("never reaches the Terms page")
+        def wait_for_timeout(self, ms): time.sleep(ms / 1000)
+
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="login.usc.edu"):
+        read_course_bin(StuckPage(), wait_seconds=1)
+    assert time.monotonic() - started < 3

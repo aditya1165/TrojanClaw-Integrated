@@ -70,19 +70,20 @@ def _wait(check: Callable[[], bool], seconds: float, page) -> bool:
     return False
 
 
-def read_course_bin(page, show_popup: Callable[[bool], None], silent_seconds: float, total_seconds: float) -> list[dict[str, Any]]:
-    """Open WebReg in the signed-in window and read every listed term's course bin."""
+def read_course_bin(page, wait_seconds: float = 30) -> list[dict[str, Any]]:
+    """Open WebReg in the signed-in window and read every listed term's course bin.
+
+    Best effort and silent: WebReg is optional, so it never brings the sign-in window back.
+    If it doesn't reach its Terms page by itself (USC asks again, or a Cloudflare check),
+    it is skipped and the window closes; signing in again tries once more."""
     page.goto(SIGN_IN, wait_until="domcontentloaded")
 
     def on_terms() -> bool:
         return page.url.startswith(WEBREG + "/Terms") and page.locator(".terms-list .term-title").count() > 0
 
-    if not _wait(on_terms, silent_seconds, page):
-        logger.info("USC setup: WebReg needs the student, showing the popup")
-        show_popup(True)
-        if not _wait(on_terms, total_seconds - silent_seconds, page):
-            raise TimeoutError("WebReg sign-in was not finished in time.")
-        show_popup(False)
+    if not _wait(on_terms, wait_seconds, page):
+        host = (page.url.split("/")[2] if "://" in page.url else page.url) or "unknown"
+        raise TimeoutError(f"WebReg did not open by itself (stopped at {host}); skipped this time.")
 
     terms = [title.strip() for title in page.locator(".terms-list .term-title").all_inner_texts() if title.strip()]
     results = []

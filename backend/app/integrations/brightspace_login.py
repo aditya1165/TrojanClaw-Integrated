@@ -20,11 +20,13 @@ def wait_for_brightspace(context: BrowserContext, page: Page) -> bool:
     page.goto(BRIGHTSPACE_URL)
     deadline = time.monotonic() + WAIT_SECONDS
     while time.monotonic() < deadline:
+        # Wait with the browser's timer, not time.sleep: Playwright only refreshes page.url while
+        # it handles a browser call, so a plain sleep can leave page.url stuck on an old page.
+        page.wait_for_timeout(1000)
+        cookies = _cookie_names(context)
         url = urlparse(page.url)
-        if (url.hostname == BRIGHTSPACE_HOST and url.path.startswith("/d2l/home")
-                and set(BRIGHTSPACE_COOKIES) <= _cookie_names(context)):
+        if url.hostname == BRIGHTSPACE_HOST and url.path.startswith("/d2l/home") and set(BRIGHTSPACE_COOKIES) <= cookies:
             return True
-        time.sleep(1)
     return False
 
 

@@ -34,6 +34,7 @@ POPUP_WIDTH = 520
 POPUP_HEIGHT = 720
 SILENT_SECONDS = 20  # how long a site may take to sign in by itself before the popup comes back
 SITE_SECONDS = 300   # total time allowed per site, including the student's part
+WEBREG_SECONDS = 30  # WebReg is optional: read it if it opens by itself, otherwise skip it
 
 # USC's direct Handshake sign-in link: it skips Handshake's "choose your school" page.
 HANDSHAKE_SIGN_IN = "https://usc.joinhandshake.com/auth/saml/70/session/new?redirect_to_idp=true"
@@ -66,12 +67,14 @@ def handshake_origin(url: str) -> str | None:
     return f"https://{host}"
 
 
-def _wait(check: Callable[[], bool], seconds: float) -> bool:
+def _wait(check: Callable[[], bool], seconds: float, page) -> bool:
+    """Poll `check` about once a second. Waits with the browser's timer (not time.sleep), so
+    Playwright keeps page.url up to date between checks."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if check():
             return True
-        time.sleep(1)
+        page.wait_for_timeout(1000)
     return False
 
 
@@ -100,11 +103,11 @@ def connect_handshake(page, user_id: UUID) -> None:
         except Exception:  # redirects are expected while signing in
             return False
 
-    if not _wait(signed_in, SILENT_SECONDS):
+    if not _wait(signed_in, SILENT_SECONDS, page):
         logger.info("USC setup: Handshake needs the student, showing the popup")
         connectors.set_state(user_id, "handshake", IntegrationState.connecting, "Finish the USC sign-in in the pop-up.")
         _show_popup(page, visible=True)
-        if not _wait(signed_in, SITE_SECONDS - SILENT_SECONDS):
+        if not _wait(signed_in, SITE_SECONDS - SILENT_SECONDS, page):
             raise TimeoutError("Handshake sign-in was not finished in time.")
         _show_popup(page, visible=False)
 
@@ -119,7 +122,7 @@ def connect_webreg(page, user_id: UUID) -> None:
     """Read the WebReg course bin (read-only) with the same USC login and save it for this account."""
     from app.integrations.webreg import read_course_bin, save_snapshot
 
-    terms = read_course_bin(page, lambda visible: _show_popup(page, visible), SILENT_SECONDS, SITE_SECONDS)
+    terms = read_course_bin(page, WEBREG_SECONDS)  # never brings the window back; skipped if not ready
     if not terms:
         raise RuntimeError("WebReg showed no terms.")
     save_snapshot(user_id, terms)
@@ -162,6 +165,10 @@ def browser_login(position: Position, identify: Identify, ready: Ready) -> None:
             # An in-memory context: the USC login session disappears when the browser closes.
             context = browser.new_context(no_viewport=True)
             page = context.new_page()
+            try:
+                page.bring_to_front()  # so it can't hide behind the student's own browser
+            except Exception:
+                pass
             if not wait_for_brightspace(context, page):
                 raise TimeoutError("The USC login was not finished in time.")
             logger.info("USC login: Brightspace login detected, asking who logged in")
