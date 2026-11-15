@@ -11,11 +11,13 @@ OAuth callback URIs and mandatory event approval, are documented in
 ```text
 backend/
 ├── app/
+│   ├── agent/               # Claude agent runtime (tool runner, streaming)
 │   ├── api/routes/          # HTTP-only request handling
 │   ├── integrations/        # Piazza and Brightspace MCP boundaries
+│   ├── mcp_server/          # TrojanClaw MCP tools, built per student
 │   ├── models/              # Validated API and domain models
 │   ├── repositories/        # PostgreSQL access
-│   ├── services/            # Chat, embeddings, prompts, and LLM use cases
+│   ├── services/            # Chat, calendar, embeddings, sources and activity text
 │   ├── config.py            # Typed environment configuration
 │   ├── database.py          # Lazy bounded connection pool
 │   ├── dependencies.py      # Dependency wiring
@@ -27,14 +29,14 @@ backend/
 └── README.md
 ```
 
-The application supports username/password accounts. Chat runs the agent for the
+Students sign in with Continue with Google, then one USC login (see [CONNECTORS.md](../CONNECTORS.md)). Chat runs the agent for the
 signed-in account: course tools read only that account's rows, while campus search
 and EngageSC events are shared public data. See `TrojanClaw_v2_Architecture_and_Spec.md` (§2.0, §5.9).
 Account authentication is separate from extension linking.
 
 ## EngageSC public events
 
-Sign in and select **Link public events** in the EngageSC sidebar card. This
+Sign in, open **Sources**, and select **Turn on** next to EngageSC. This
 subscribes that account to the public campus event feed; no USC credentials,
 private event access, registration, or calendar writes are involved. View events
 supports a text search and a 7/30/90-day range. Other extensions remain deferred.
@@ -66,40 +68,14 @@ does not copy another account's extension settings or private academic data.
 Set `RUN_ENGAGESC_DB_TESTS=1` when running pytest to exercise the live feed,
 database persistence, search, and account isolation with temporary accounts.
 
-## Account authentication
+## Accounts and sessions
 
-Apply the existing base migrations, then `supabase/migrations/20261116000000_password_auth.sql`.
-To apply just the auth migration using the configured `backend/.env`, run from the
-repository root:
+There is one way to sign in: **Continue with Google**, followed by one USC login that finds the account by Brightspace user ID and connects the sources (`/auth/google/*`, see [CONNECTORS.md](../CONNECTORS.md)). Username/password sign-in and the separate Sign in with USC button were removed; the old `account_credentials` table is no longer used.
 
-```powershell
-.\backend\.venv\Scripts\python.exe scripts/apply_auth_migration.py --apply
-```
-
-The helper also updates existing Supabase migration history. Without `--apply`,
-it only checks for the prerequisite account tables.
-
-- `POST /auth/register`: `{ "name", "username", "password", "confirm_password" }`
-- `POST /auth/login`: `{ "username", "password" }`
 - `GET /auth/me`: returns `{ "id", "name", "username" }` or 401.
 - `POST /auth/logout`: revokes the session and clears the cookie.
 
-Usernames are case-insensitive, 3–32 ASCII letters/numbers/underscores; passwords
-are 8–128 characters at registration. Passwords use salted scrypt (N=2^17, r=8,
-p=1). Only hashes are stored. Session cookies are HttpOnly, SameSite=Lax, expire
-after seven days, and contain a random token whose SHA-256 hash is stored in
-`account_sessions`. Registration writes the profile, password hash, and session
-in a single transaction. Credential and session tables deny browser database roles.
-
-Use HTTPS and set `APP_ENV=production` in production to require Secure cookies.
-Frontend and API must be hosted on the same site (for example sibling subdomains),
-and `CORS_ORIGINS` must include the exact frontend origin. In local development,
-use `localhost` for both hosts, or `127.0.0.1` for both. Browser requests include cookies.
-No password or session token is stored in localStorage.
-
-Login and registration share a per-process limit of 20 attempts per IP per five
-minutes. For multiple workers or instances, also configure a shared rate limit
-at the ingress; the app does not trust forwarded client-IP headers.
+Session cookies are HttpOnly, SameSite=Lax, expire after seven days, and contain a random token whose SHA-256 hash is stored in `account_sessions`. Use HTTPS and set `APP_ENV=production` in production to require Secure cookies. No session token is stored in localStorage. Starting a Google sign-in is limited to 20 attempts per IP per five minutes, per process.
 
 Run backend tests with `python -m pytest backend/tests -q` from the repository root.
 Set `RUN_AUTH_DB_TESTS=1` to include the real PostgreSQL account lifecycle test;
@@ -240,12 +216,64 @@ The liveness response is:
 
 ## API Docs
 
-`GET /integrations` lists Piazza (unavailable), Brightspace, and Handshake.
+`GET /integrations` lists Brightspace, Handshake and Piazza.
 Local-only `POST /integrations/{provider}/connect` opens a persistent Chromium
 sign-in window in a background job; poll the list for the result.
 `POST /integrations/{provider}/verify` checks the saved session through MCP.
-`POST /chat` accepts `connectors: ["brightspace", "handshake"]` to enable
-read-only live tool use. See [CONNECTORS.md](../CONNECTORS.md) for setup.
+`POST /chat` runs the agent; its `connectors` list (`brightspace`, `handshake`,
+`piazza`) is the sources turned on in chat, which limits the saved sessions the
+agent may use (this computer only). See [CONNECTORS.md](../CONNECTORS.md) for setup.
+
+### Chats
+
+Each account has many saved chats (`public.conversations` and
+`public.conversation_messages`). The server keeps the history: `POST /chat`
+takes `{conversation_id, message, connectors, timezone}`, loads the last 20
+saved messages, and saves the new question and answer together. Leave out
+`conversation_id` to start a new chat; the reply returns its id and a
+first-line title, and an AI-written title replaces it a moment later.
+
+The reply streams as newline-delimited JSON (`application/x-ndjson`):
+`activity` (what is being looked up, such as "Checking Brightspace: upcoming
+due dates"), `text` (part of the reply as it is written), `reset` (drop the
+text so far; the reply is being rewritten after tool calls), then `done` (the
+saved reply with `response`, `sources`, `calendar_proposals`,
+`conversation_id`, `title`) or `error`. A reply keeps running and is saved
+even if the browser stops listening.
+
+`sources` are links shown under a reply. A link is included only if it came
+from a connector tool result or retrieved document and the reply cites it;
+otherwise the reply just names the sources it checked.
+
+- `GET /conversations?q=`: your chats, pinned first, then newest; `q` searches titles and messages
+- `POST /conversations/{id}/pin` with `{pinned}`
+- `GET /conversations/{id}/messages`: one chat's messages
+- `POST /conversations/{id}/rename` with `{title}`
+- `POST /conversations/{id}/delete`: also deletes that chat's calendar drafts
+
+### Attached files
+
+- `POST /uploads` (multipart, field `file`): checks the type by extension **and** contents (PDF, PNG, JPEG, GIF, WebP, UTF-8 text and code, DOCX, PPTX, XLSX; no SVG or other active content), refuses files over 5 MB, and stores the file in the private `chat-uploads` bucket at `<account id>/<upload id>/<file name>`. Returns `{id, name, mime, size, kind}`.
+- `GET /uploads/{id}`: downloads one of the signed-in account's own files (always as a download, `nosniff`).
+- `POST /chat` takes `attachments: [upload ids]` (up to 5). Each must belong to the signed-in account. PDFs and images are sent to Claude as document and image blocks; text as a text document; Word, PowerPoint and Excel as extracted text (`python-docx`, `python-pptx`, `openpyxl`). The IDs are saved with the message. The next message (one follow-up) includes those files again, up to 18 MB in total (a Claude request is limited to 32 MB); after that they are replaced by a note asking the student to attach them again, because every file is paid for again on each message and tool round.
+
+### Token use
+
+Every chat message runs the agent, and each tool round re-sends the whole request, so the backend keeps requests small and cached:
+
+- **Prompt caching**: the tools and the fixed instructions (`prompts/ai_instructions.md`) carry a cache breakpoint, and the growing conversation is cached automatically (top-level `cache_control`), so repeated input is billed at the cache-read rate. The date and time, connector list and calendar rules change on every request, so they go in a `role: "system"` message after the conversation (supported on Sonnet 5.5, Opus 5.5 and Haiku 5.5); the next message in a chat then re-reads the earlier turns from the cache. Older models get them as a second `system` block instead.
+- At most 5 tool rounds per reply (`max_tool_rounds` in `config/agent.yaml`), the last 20 saved messages as history, connector results capped at 20,000 characters (with a note to ask a narrower question), and files re-sent for one follow-up only.
+- Each model call is logged as `Claude call: input=… cache_read=… cache_write=… output=…`, so cache hits can be checked in the backend terminal.
+- The model is set in `config/agent.yaml` (`claude-sonnet-5-5`); `claude-opus-5-5` costs twice as much, `claude-haiku-5-5` much less.
+- Deleting a chat deletes its files. Uploads that were never sent stay in the bucket.
+
+The bucket has no storage policies, so browser keys can't reach it; the backend uses `SUPABASE_SECRET_KEY` (Supabase Dashboard → Project Settings → API Keys → Secret keys). Migration: `20261123000000_chat_uploads_bucket.sql`.
+
+Calendar drafts belong to the chat that created them
+(`calendar_proposals.conversation_id`, migration `20261121000000`);
+`GET /calendar/proposals?conversation_id=` lists one chat's drafts. A chat
+from another account always returns 404. Pins are `conversations.pinned_at`
+(migration `20261122000000`).
 
 FastAPI auto-generates interactive docs:
 

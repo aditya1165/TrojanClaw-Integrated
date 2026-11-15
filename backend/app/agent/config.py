@@ -58,13 +58,13 @@ def load_agent_config(settings: Settings) -> AgentConfig:
     config_dir: Path = settings.config_dir
     config_path = config_dir / "config" / "agent.yaml"
     try:
-        raw = yaml.safe_load(config_path.read_text()) or {}
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except FileNotFoundError as exc:
         raise ConfigurationError(f"Agent config not found: {config_path}") from exc
 
     prompt_path = config_dir / raw.get("system_prompt_file", "prompts/ai_instructions.md")
     try:
-        system_prompt = prompt_path.read_text().strip()
+        system_prompt = prompt_path.read_text(encoding="utf-8").strip()
     except FileNotFoundError as exc:
         raise ConfigurationError(f"System prompt file not found: {prompt_path}") from exc
     if not system_prompt:

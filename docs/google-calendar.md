@@ -1,10 +1,13 @@
 # Google Calendar MCP and Google-first USC sign-in
 
-Chat can propose a single event from user-supplied dates and times. It does not
-choose study times automatically. Proposals appear below the conversation and
-can be edited or cancelled without writing to Google. Only **Approve addition**
-calls the backend approval endpoint and creates the reviewed event through
-the local open-source [nspady/google-calendar-mcp](https://github.com/nspady/google-calendar-mcp)
+Chat can read the student's events (`list_calendar_events`, up to 31 days per
+request), draft a new event or a bounded repeating series with an optional popup
+reminder (`propose_calendar_event`), and draft a change to an existing timed
+event (`propose_calendar_update`). It does not choose study times automatically.
+Each draft becomes a review card below the conversation, in the chat that made
+it, and can be edited or cancelled without writing to Google. Only **Approve
+addition** or **Approve changes** calls the backend approval endpoint and writes
+the reviewed event through the local open-source [nspady/google-calendar-mcp](https://github.com/nspady/google-calendar-mcp)
 server, pinned to `@cocal/google-calendar-mcp@2.8.1`.
 
 ## Setup
@@ -59,9 +62,9 @@ server, pinned to `@cocal/google-calendar-mcp@2.8.1`.
    tokens are encrypted with this key in PostgreSQL. Replacing the key requires
    users to reconnect. The frontend URL must also be in `CORS_ORIGINS`.
 6. Restart the backend and use **Continue with USC Google** in the sign-in
-   dialog. Existing users can also select **Connect** in the Google Calendar
-   card. Connecting uses a full-page redirect, so finish or copy any unsaved
-   conversation first.
+   dialog. Existing users can open **Sources** in the chat sidebar and select
+   **Connect** next to Google Calendar. Connecting uses a full-page redirect;
+   chats are saved, so nothing is lost.
 
 Google consent grants API access, not approval of individual events. Requested
 scopes are `calendar.calendarlist.readonly`, `calendar.events.readonly`,
@@ -105,13 +108,15 @@ prompt or automatic reuse of Google's Shibboleth session.
 Pending sign-ins are held in memory, encrypted after the OAuth exchange, expire
 after ten minutes per stage, and are bound to the initiating browser cookie.
 Run one local backend worker; restarting it requires starting sign-in again.
-The existing **Sign in with USC** and username/password options remain available.
+Continue with Google is the only way to sign in; the USC login step always follows it.
 
 ## Try it
 
-Ask chat: “Add a study session on [a future date] from 4 to 5 PM.” The browser's
-time zone is supplied with the chat request; an explicitly requested zone takes
-precedence. If a date, title, time or duration is missing, chat should ask for it.
+Ask chat: “Add a study session on [a future date] from 4 to 5 PM.” The time zone
+from **Settings** (the browser's, unless changed) is supplied with the chat
+request; an explicitly requested zone takes precedence. Each draft belongs to
+the chat that created it and shows only in that chat; deleting the chat deletes
+its drafts, not events already added to Google Calendar. If a date, title, time or duration is missing, chat should ask for it.
 Verify the actual draft before approving.
 
 - Review the title, start, end, time zone, location, description, and destination.
@@ -121,9 +126,12 @@ Verify the actual draft before approving.
   then saves the exact approved draft. A conflict returns the proposal to review.
 - Successful saves show an **Open in Google Calendar** link.
 
-The initial version supports single events on the connected primary calendar.
-It creates no guests, recurring rules, or reminders, and offers no move/delete
-operations. Availability checking covers only that primary calendar and is a
+Supported on the connected primary calendar: reading events; new single events
+and daily, weekly or monthly series (up to 52 occurrences within a year, every
+occurrence listed on the card) with an optional popup reminder; and changes to
+an existing timed event or a whole recurring series, shown as before/after.
+Deleting events, guests, and editing all-day events are not supported.
+Availability checking covers only that primary calendar and is a
 snapshot; Google cannot reserve a time atomically between the check and save.
 Availability uses the upstream `get-freebusy` tool, bounded to the exact proposed
 interval. Missing or errored calendar availability fails instead of assuming
@@ -131,7 +139,9 @@ the time is free.
 
 ## Approval and retry guarantees
 
-The model has only a `propose_calendar_event` tool. Approval is an authenticated
+The model can read events and draft proposals (`list_calendar_events`,
+`propose_calendar_event`, `propose_calendar_update`); none of these writes to
+Google. Approval is an authenticated
 POST from the review UI; typing “yes” in chat cannot execute a calendar write.
 The approval body contains only the proposal version, never replacement event
 details. The backend uses the stored, validated draft and rejects stale versions.
@@ -149,9 +159,11 @@ Creates preserve the reviewed fields, caller-supplied event ID, explicit reminde
 suppression, and private proposal marker. The gateway verifies that the approved
 proposal ID, event ID and marker agree before enabling a create tool.
 
-The approval service alone can call MCP `create-event`. Read invocations register
-only `list-calendars`, `get-event`, and `get-freebusy`. Update, delete, account
-management, invitation-response, and arbitrary tool execution are unavailable.
+The approval service alone can call MCP `create-event`, and `update-event` only
+for an approved change proposal (with the original ETag as `If-Match`). Read
+invocations register only `list-calendars`, `list-events`, `get-event`, and
+`get-freebusy`. Delete, account management, invitation-response, and arbitrary
+tool execution are unavailable.
 
 Calendar MCP tool results and credentials are not exposed as model tools.
 The model receives only its own validated proposal output. Connector/source

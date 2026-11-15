@@ -1,14 +1,42 @@
 export type ChatRole = "user" | "assistant";
 
-export interface ChatMessage {
-  role: ChatRole;
-  content: string;
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  updated_at: string;
+  pinned: boolean;
 }
 
-export interface ChatRequest {
-  messages: ChatMessage[];
-  connectors?: string[];
-  timezone?: string;
+/** Where part of a reply came from: a deadline, post, announcement, event, page or connector. */
+export interface Source {
+  title: string;
+  url: string | null;
+  course: string | null;
+  kind: string | null;
+}
+
+/** A file attached to a chat message (kept in the private Supabase bucket). */
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "pdf" | "image" | "text" | "docx" | "pptx" | "xlsx";
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  created_at: string;
+  sources: Source[];
+  attachments: Attachment[];
+}
+
+/** Sent after each reply is saved, so the chat list can update. */
+export interface ChatSaved {
+  conversation_id: string;
+  title: string | null;
 }
 
 export interface CalendarEventDraft {
@@ -18,6 +46,8 @@ export interface CalendarEventDraft {
   timezone: string;
   description: string;
   location: string;
+  recurrence?: { frequency: "DAILY" | "WEEKLY" | "MONTHLY"; interval: number; weekdays: string[]; count: number | null; until: string | null } | null;
+  reminder_minutes?: number | null;
 }
 
 export interface CalendarProposal {
@@ -28,6 +58,12 @@ export interface CalendarProposal {
   status: "pending" | "approved" | "applied" | "cancelled";
   expires_at: string;
   event_url: string | null;
+  operation?: "create" | "update";
+  scope?: "event" | "series";
+  before?: { summary?: string; start?: { dateTime?: string }; end?: { dateTime?: string }; location?: string; description?: string; recurrence?: string[]; reminders?: object } | null;
+  occurrences?: { start: string; end: string }[];
+  recurrence_changed?: boolean;
+  reminder_changed?: boolean;
 }
 
 export interface CalendarStatus {
@@ -39,6 +75,9 @@ export interface CalendarStatus {
 export interface ChatResponse {
   response: string;
   calendar_proposals?: CalendarProposal[];
+  sources?: Source[];
+  conversation_id?: string;
+  title?: string | null;
 }
 
 export const API_BASE_URL =
@@ -114,64 +153,32 @@ export function authRequest<T>(path: string, body?: object): Promise<T> {
   return apiRequest<T>(`/auth/${path}`, body);
 }
 
-export async function sendChatMessage(
-  request: ChatRequest,
-): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/chat`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(request),
-  });
 
-  if (!response.ok) {
-    const fallbackMessage = `Request failed with status ${response.status}`;
+export const listConversations = (search = "") =>
+  apiRequest<ConversationSummary[]>(`/conversations${search ? `?q=${encodeURIComponent(search)}` : ""}`);
+export const pinConversation = (id: string, pinned: boolean) =>
+  apiRequest<ConversationSummary>(`/conversations/${encodeURIComponent(id)}/pin`, { pinned });
+export const getConversationMessages = (id: string) =>
+  apiRequest<ConversationMessage[]>(`/conversations/${encodeURIComponent(id)}/messages`);
+export const renameConversation = (id: string, title: string) =>
+  apiRequest<ConversationSummary>(`/conversations/${encodeURIComponent(id)}/rename`, { title });
+export const deleteConversation = (id: string) =>
+  apiRequest<void>(`/conversations/${encodeURIComponent(id)}/delete`, {});
 
-    try {
-      const errorBody = (await response.json()) as { detail?: string };
-      throw new Error(errorBody.detail ?? fallbackMessage);
-    } catch {
-      throw new Error(fallbackMessage);
-    }
-  }
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 5;
+export const UPLOAD_ACCEPT = ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv,.json,.py,.js,.ts,.java,.c,.cpp,.html,.css,.sql,.docx,.pptx,.xlsx";
+export const uploadUrl = (id: string) => `${API_BASE_URL}/uploads/${encodeURIComponent(id)}`;
 
-  return (await response.json()) as ChatResponse;
-}
-
-export async function chatEndpointFetch(
-  _input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
-  window.dispatchEvent(new Event("calendar-chat-started"));
-  const response = await fetch(`${API_BASE_URL}/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: init?.body,
-    signal: init?.signal,
-    credentials: "include",
-  });
-
+/** Upload one file for the next chat message. */
+export async function uploadFile(file: File): Promise<Attachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/uploads`, { method: "POST", body: form, credentials: "include" });
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event("auth-expired"));
-    const data = await response.json().catch(() => null) as { detail?: unknown } | null;
-    const message = typeof data?.detail === "string" ? data.detail : "Could not send your message. Please try again.";
-    return new Response(message, { status: response.status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    const data = await response.json().catch(() => ({})) as { detail?: unknown };
+    throw new ApiError(typeof data.detail === "string" ? data.detail : "Couldn't upload this file.", response.status);
   }
-
-  const data = (await response.json()) as ChatResponse;
-
-  window.dispatchEvent(new CustomEvent<CalendarProposal[]>("calendar-drafted", {
-    detail: data.calendar_proposals ?? [],
-  }));
-
-  return new Response(data.response, {
-    status: response.status,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-    },
-  });
+  return response.json();
 }

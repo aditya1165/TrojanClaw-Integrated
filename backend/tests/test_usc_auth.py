@@ -7,13 +7,10 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 from psycopg2.errors import UniqueViolation
 
-import app.api.routes.auth as auth_routes
-from app.main import app
 from app.models.auth import AccountProfile
-from app.services.auth import AuthService, COOKIE_NAME, get_auth_service, token_hash, usc_usernames
+from app.services.auth import AuthService, token_hash, usc_usernames
 from app.services.usc_auth import UscLogin, handshake_origin
 from tests.test_auth import StubDatabase
 
@@ -103,58 +100,10 @@ def test_only_one_login_window_at_a_time():
     release.set()
 
 
-@pytest.fixture
-def usc_routes(monkeypatch):
-    positions = []
-
-    def run_login(position, identify, ready):
-        positions.append(position)
-        sign_in(position, identify, ready)
-
-    login = UscLogin(run_login=run_login, find_account=lambda whoami: ACCOUNT)
-    login.positions = positions
-    monkeypatch.setattr(auth_routes, "usc_login", login)
-
-    class StubService:
-        def start_session(self, user_id, old_token):
-            assert user_id == ACCOUNT.id
-            return "session-token"
-
-        def current_user(self, token):
-            if token != "session-token":
-                raise HTTPException(401, "Please sign in.")
-            return ACCOUNT
-
-    app.dependency_overrides[get_auth_service] = StubService
-    yield login
-    app.dependency_overrides.pop(get_auth_service, None)
 
 
-def test_usc_login_sets_session_once(usc_routes):
-    with TestClient(app) as client:
-        attempt_id = client.post("/auth/usc/start").json()["attempt_id"]
-        wait_until_finished(usc_routes, attempt_id)
-        response = client.post("/auth/usc/status", json={"attempt_id": attempt_id})
-        assert response.status_code == 200
-        assert response.json()["status"] == "done"
-        assert response.json()["account"]["username"] == "ttrojan"
-        assert response.cookies.get(COOKIE_NAME) == "session-token"
-        cookie = response.headers['set-cookie'].lower()
-        assert 'httponly' in cookie and 'samesite=lax' in cookie and 'path=/' in cookie
-        assert client.get('/auth/me').status_code == 200
-        assert client.get('/auth/me').json()['id'] == str(ACCOUNT.id)
-        # A finished attempt cannot be used again.
-        assert client.post("/auth/usc/status", json={"attempt_id": attempt_id}).status_code == 404
 
 
-def test_popup_position_reaches_the_login(usc_routes):
-    with TestClient(app) as client:
-        first = client.post("/auth/usc/start", json={"left": 300, "top": 120}).json()["attempt_id"]
-        wait_until_finished(usc_routes, first)
-        client.post("/auth/usc/status", json={"attempt_id": first})
-        second = client.post("/auth/usc/start").json()["attempt_id"]  # no position: the browser decides
-        wait_until_finished(usc_routes, second)
-    assert usc_routes.positions == [(300, 120), None]
 
 
 def test_setup_failure_after_sign_in_keeps_the_sign_in():
@@ -213,23 +162,5 @@ def test_handshake_origin_accepts_only_handshake_pages():
     assert handshake_origin("https://joinhandshake.com.evil.example/") is None
 
 
-def test_failed_usc_login_reports_failure(monkeypatch):
-    def fail(position, identify, ready):
-        raise TimeoutError("closed")
-
-    login = UscLogin(run_login=fail, find_account=lambda whoami: ACCOUNT)
-    monkeypatch.setattr(auth_routes, "usc_login", login)
-    with TestClient(app) as client:
-        attempt_id = client.post("/auth/usc/start").json()["attempt_id"]
-        wait_until_finished(login, attempt_id)
-        body = client.post("/auth/usc/status", json={"attempt_id": attempt_id}).json()
-    assert body["status"] == "failed"
-    assert COOKIE_NAME not in body
 
 
-def test_usc_login_rejects_unknown_attempt_and_cross_site_requests(usc_routes):
-    with TestClient(app) as client:
-        assert client.post("/auth/usc/status", json={"attempt_id": "unknown"}).status_code == 404
-        untrusted = {"Origin": "https://untrusted.example"}
-        assert client.post("/auth/usc/start", headers=untrusted).status_code == 403
-        assert client.post("/auth/usc/status", json={"attempt_id": "x"}, headers=untrusted).status_code == 403

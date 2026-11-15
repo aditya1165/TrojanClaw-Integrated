@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.database import get_database
 from app.integrations.local import get_local_connectors
 from app.mcp_server.server import build_mcp_server
+from app.repositories.conversations import ConversationRepository
 from app.repositories.documents import DocumentRepository
 from app.repositories.student_data import StudentDataRepository
 from app.services.chat import ChatService
@@ -49,3 +50,8 @@ def get_agent_runtime() -> AgentRuntime:
 @lru_cache(maxsize=1)
 def get_chat_service() -> ChatService:
     return ChatService(get_agent_runtime(), calendar=get_calendar_service())
+
+
+@lru_cache(maxsize=1)
+def get_conversation_repository() -> ConversationRepository:
+    return ConversationRepository(get_database())

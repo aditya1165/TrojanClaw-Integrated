@@ -52,6 +52,7 @@ class Settings:
     database_pool_max: int
     supabase_url: str | None
     supabase_key: str | None
+    supabase_secret_key: str | None  # backend-only; chat file uploads (private Storage bucket)
     gemini_api_key: str | None
     embedding_model: str
     embedding_dimensions: int
@@ -87,6 +88,7 @@ class Settings:
             database_pool_max=_integer("DATABASE_POOL_MAX", 5),
             supabase_url=_optional("SUPABASE_URL"),
             supabase_key=_optional("SUPABASE_KEY"),
+            supabase_secret_key=_optional("SUPABASE_SECRET_KEY"),
             gemini_api_key=_optional("GEMINI_API_KEY"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001").strip(),
             embedding_dimensions=_integer("EMBEDDING_DIMENSIONS", 1536),
@@ -135,11 +137,3 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings.from_environment()
-
-
-def get_supabase_credentials() -> tuple[str, str]:
-    """Compatibility helper for the Supabase SDK client."""
-    settings = get_settings()
-    if not settings.supabase_url or not settings.supabase_key:
-        raise ConfigurationError("SUPABASE_URL and SUPABASE_KEY are required.")
-    return settings.supabase_url, settings.supabase_key

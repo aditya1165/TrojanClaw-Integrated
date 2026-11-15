@@ -71,7 +71,7 @@ class GoogleSignIn:
             attempt.status = "exchanging"
         try:
             if error or not code:
-                raise AppError("Google sign-in was cancelled. You can try again or sign in with USC.", "google_signin_cancelled", 400)
+                raise AppError("Google sign-in was cancelled. You can try again.", "google_signin_cancelled", 400)
             calendar = self.calendar_factory()
             tokens = calendar.exchange(code, attempt.verifier, redirect_uri=calendar.settings.google_signin_redirect_uri)
             email = calendar.google_identity(tokens)

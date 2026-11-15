@@ -1,8 +1,7 @@
-"""Password verification and revocable, database-backed browser sessions."""
+"""Accounts (found from the USC login) and revocable, database-backed browser sessions."""
 
 from functools import lru_cache
 import hashlib
-import hmac
 import json
 import logging
 import re
@@ -13,7 +12,7 @@ from fastapi import HTTPException
 from psycopg2.errors import UniqueViolation
 
 from app.database import Database, get_database
-from app.models.auth import AccountProfile, RegisterRequest
+from app.models.auth import AccountProfile
 
 
 logger = logging.getLogger(__name__)
@@ -21,32 +20,14 @@ SESSION_SECONDS = 60 * 60 * 24 * 7
 COOKIE_NAME = "trojanclaw_session"
 
 
-def hash_password(password: str, salt: bytes | None = None) -> str:
-    salt = salt or secrets.token_bytes(16)
-    digest = hashlib.scrypt(
-        password.encode("utf-8"), salt=salt, n=2**17, r=8, p=1,
-        maxmem=256 * 1024 * 1024, dklen=32,
-    )
-    return f"scrypt${salt.hex()}${digest.hex()}"
 
 
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        algorithm, salt, _ = stored.split("$")
-        if algorithm != "scrypt":
-            return False
-        return hmac.compare_digest(hash_password(password, bytes.fromhex(salt)), stored)
-    except (ValueError, TypeError):
-        return False
 
 
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-@lru_cache(maxsize=1)
-def _dummy_hash() -> str:
-    return hash_password(secrets.token_urlsafe(32))
 
 
 def usc_usernames(unique_name: str, brightspace_id: str) -> list[str]:
@@ -74,42 +55,6 @@ class AuthService:
             (token_hash(token), user_id, SESSION_SECONDS),
         )
         return token
-
-    def register(self, payload: RegisterRequest, old_token: str | None) -> tuple[AccountProfile, str]:
-        password_hash = hash_password(payload.password.get_secret_value())
-        user_id = str(uuid4())
-        try:
-            with self.database.connection() as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "INSERT INTO public.app_users (id, display_name, username) VALUES (%s, %s, %s) RETURNING id, display_name, username",
-                        (user_id, payload.name, payload.username),
-                    )
-                    profile = _profile(cursor.fetchone())
-                    cursor.execute(
-                        "INSERT INTO public.account_credentials (user_id, password_hash) VALUES (%s, %s)",
-                        (user_id, password_hash),
-                    )
-                    token = self._new_session(cursor, user_id, old_token)
-        except UniqueViolation as exc:
-            raise HTTPException(409, "That username is already taken.") from exc
-        return profile, token
-
-    def login(self, username: str, password: str, old_token: str | None) -> tuple[AccountProfile, str]:
-        with self.database.connection() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT u.id, u.display_name, u.username, c.password_hash FROM public.app_users u JOIN public.account_credentials c ON c.user_id = u.id WHERE u.username = %s",
-                    (username,),
-                )
-                row = cursor.fetchone()
-        valid = verify_password(password, row[3] if row else _dummy_hash())
-        if not row or not valid:
-            raise HTTPException(401, "Incorrect username or password.")
-        with self.database.connection() as connection:
-            with connection.cursor() as cursor:
-                token = self._new_session(cursor, str(row[0]), old_token)
-        return _profile(row), token
 
     def find_or_create_usc_account(self, whoami: dict) -> AccountProfile:
         """The account for Brightspace's whoami after a USC login, created on first use.

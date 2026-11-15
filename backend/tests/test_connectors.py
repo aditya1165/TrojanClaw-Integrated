@@ -267,3 +267,19 @@ def test_sessions_needing_login_or_not_allowed_by_the_goal_are_left_out():
     fake = SavedConnectors({USER: {"brightspace": "needs_login", "handshake": "saved"}})
     providers, _ = asyncio.run(_runtime(fake)._connector_definitions_for(USER, ("brightspace",), [], True))
     assert providers == []
+
+
+def test_sources_turned_off_in_chat_are_not_used_even_with_a_saved_session():
+    runtime = _runtime(SavedConnectors())
+    seen = []
+
+    async def capture(user_id, allowed, selected, use_saved):
+        seen.append(list(allowed))
+        raise RuntimeError("stop here")
+
+    runtime._connector_definitions_for = capture
+    for allowed_connectors in (["handshake"], None):
+        with pytest.raises(RuntimeError):
+            asyncio.run(runtime.run("chat", [{"role": "user", "content": "hi"}], user_id=USER,
+                                    use_saved_connectors=True, allowed_connectors=allowed_connectors))
+    assert seen == [["handshake"], ["brightspace", "handshake", "piazza"]]

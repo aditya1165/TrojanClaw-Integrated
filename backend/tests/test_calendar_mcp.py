@@ -40,6 +40,15 @@ def test_mcp_create_requires_stored_approval_marker():
     mcp.run.assert_not_called()
 
 
+def test_mcp_list_uses_connected_calendar_and_bounded_times():
+    mcp = CalendarMCP()
+    mcp.run = MagicMock(return_value={"status": 200, "data": {"events": []}})
+    result = mcp.request("token", "GET", "/calendars/student%40usc.edu/events", params={
+        "timeMin": "2030-11-17T00:00:00-08:00", "timeMax": "2030-11-18T00:00:00-08:00", "timeZone": "America/Los_Angeles"})
+    assert result.json() == {"events": []}
+    mcp.run.assert_called_once_with("token", "list", calendar_id="student@usc.edu", start="2030-11-17T00:00:00-08:00", end="2030-11-18T00:00:00-08:00", timezone="America/Los_Angeles")
+
+
 @pytest.mark.parametrize("method,path", [("DELETE", "/calendars/primary/events/event"),
                                           ("PATCH", "/calendars/primary/events/event"),
                                           ("POST", "/calendars/primary/events/event/move")])

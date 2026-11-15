@@ -88,7 +88,7 @@ Forward MCP request headers and allow chat requests lasting up to 240 seconds.
   authenticated subject and that account's saved read-only source connections.
   Calendar drafts/writes and connector login actions are excluded.
 - Access continues independently of the browser session until expiry/revocation.
-  Connect your sources → **Disconnect all assistants** revokes that account's
+  Settings → **Disconnect all assistants** revokes that account's
   assistant codes/grants without signing out the browser or Android app.
 - Answer data is sent to Gemini; the normal TrojanClaw assistant's model provider
   also processes the question as it does for website chat.

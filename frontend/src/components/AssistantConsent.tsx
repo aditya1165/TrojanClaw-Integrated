@@ -29,7 +29,7 @@ export function AssistantConsent({ request, account }: { request: string; accoun
       <p>Signed in as {account.name} · @{account.username}</p>
       <p>{client ? `Request from: ${client}.` : "Checking connection request…"} This name is supplied by the requesting app.</p>
       <p>Allow this assistant to ask TrojanClaw questions using your academic data and your saved Brightspace, Handshake and Piazza connections. Answers and source links will be shared with the assistant.</p>
-      <p className="text-sm text-muted">Access lasts up to seven days. Calendar changes and connector sign-ins are unavailable. You can revoke access from Connect your sources.</p>
+      <p className="text-sm text-muted">Access lasts up to seven days. Calendar changes and connector sign-ins are unavailable. You can revoke access from Settings.</p>
       {error && <p role="alert" className="text-error">{error}</p>}
       <Button disabled={!client || busy} onClick={() => void approve()}>{busy ? "Connecting…" : "Allow assistant access"}</Button>
       <Button variant="ghost" disabled={busy} onClick={() => window.location.assign("/")}>Cancel</Button>

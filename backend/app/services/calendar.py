@@ -1,7 +1,8 @@
 """Google Calendar connection, drafts, and explicitly approved event creation."""
 
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 import hashlib
 import json
@@ -15,7 +16,8 @@ import httpx
 from app.config import ConfigurationError, get_settings
 from app.database import get_database
 from app.errors import AppError
-from app.models.calendar import CalendarEventDraft, CalendarProposal, CalendarStatus
+from app.models.calendar import CalendarEventDraft, CalendarEventQuery, CalendarProposal, CalendarStatus, CalendarUpdateRequest
+from app.services.calendar_recurrence import occurrences, event_body
 from app.repositories.calendar import CalendarRepository
 from app.services.auth import token_hash
 from app.integrations.google_calendar import CalendarMCP
@@ -30,8 +32,23 @@ SCOPES = {
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 PROPOSE_TOOL = {
     "name": "propose_calendar_event",
-    "description": "Draft one event ONLY when the user requests a calendar addition. This never creates an event. Ask for missing title, date, start, end or duration, and timezone before calling. Never invent times. The user must review and click Approve in the app.",
+    "description": "Draft an event or bounded recurring series ONLY when requested. Include recurrence for repeated events and reminder_minutes for a popup notification (0 = at the event time). This never saves to Google. The user must review and click Approve.",
     "input_schema": CalendarEventDraft.model_json_schema(),
+}
+LIST_EVENTS_TOOL = {
+    "name": "list_calendar_events",
+    "description": "Read actual events from the user's connected primary Google Calendar, including events created outside chat. "
+                   "Use whenever the user asks about their events, schedule, or calendar. No approval is needed to read. "
+                   "Omit start/end for the next seven days. For today, tomorrow, or a specific week, supply explicit timezone-aware "
+                   "start and exclusive end boundaries. Maximum 31 days per request. Never invent events or infer them from chat history.",
+    "input_schema": CalendarEventQuery.model_json_schema(),
+}
+UPDATE_EVENT_TOOL = {
+    "name": "propose_calendar_update",
+    "description": "Draft changes to an existing timed Google Calendar event. First use list_calendar_events to find the exact event ID; never guess IDs. "
+                   "Supply only changed fields. For recurring events, ask whether to edit one occurrence (event) or the entire series (series). "
+                   "This reads the current event and creates a before/after review card; it does NOT change Google Calendar. Approval is required.",
+    "input_schema": CalendarUpdateRequest.model_json_schema(),
 }
 
 
@@ -122,7 +139,7 @@ class GoogleCalendar:
         if not saved:
             raise AppError("The calendar connection expired. Start connecting again.", "calendar_state_invalid", 400)
         if error or not code:
-            raise AppError("Google Calendar was not connected. You can try again from Manage sources.", "calendar_consent_denied", 400)
+            raise AppError("Google Calendar was not connected. You can try again from Sources.", "calendar_consent_denied", 400)
         tokens = self.exchange(code, saved["verifier"])
         self.complete_connection(user_id, tokens)
 
@@ -155,7 +172,7 @@ class GoogleCalendar:
     def connection(self, user_id):
         row = self.repository.connection(user_id)
         if not row:
-            raise AppError("Connect Google Calendar from Manage sources first.", "calendar_not_connected", 409)
+            raise AppError("Connect Google Calendar from Sources first.", "calendar_not_connected", 409)
         return row
 
     def request(self, connection, method, path, **kwargs):
@@ -176,31 +193,101 @@ class GoogleCalendar:
         return self.mcp.request(tokens["access_token"], method, path, **kwargs)
 
     def view(self, row, connection):
-        return CalendarProposal(id=row["id"], version=row["version"], event=row["event"],
+        stored = row["event"]
+        target = stored.get("target", {})
+        draft = CalendarEventDraft.model_validate(stored.get("draft", stored))
+        return CalendarProposal(id=row["id"], version=row["version"], event=draft,
                                 status=row["status"], expires_at=row["expires_at"],
-                                calendar=connection["calendar_label"], event_url=safe_event_url(row.get("event_url")))
+                                calendar=connection["calendar_label"], event_url=safe_event_url(row.get("event_url")),
+                                operation=stored.get("operation", "create"), before=target.get("before"), scope=target.get("scope", "event"),
+                                recurrence_changed=target.get("recurrence_changed", False), reminder_changed=target.get("reminder_changed", False),
+                                occurrences=[{"start": start.isoformat(), "end": end.isoformat()} for start, end in occurrences(draft)] if draft.recurrence else [])
 
     @staticmethod
     def future(event):
         if event.start <= datetime.now(timezone.utc):
             raise AppError("Choose a start time in the future.", "calendar_past_event", 400)
 
-    def propose(self, user_id, event):
+    def propose(self, user_id, event, conversation_id=None):
         self.future(event)
+        occurrences(event)
         connection = self.connection(user_id)
-        row = self.repository.create(user_id, connection["id"], event.model_dump(mode="json"))
+        row = self.repository.create(user_id, connection["id"], event.model_dump(mode="json"), conversation_id)
         return self.view(row, connection)
 
-    def proposals(self, user_id):
+    def proposals(self, user_id, conversation_id=None):
         if not self.configured:
             return []
         connection = self.repository.connection(user_id)
-        return [self.view(row, connection) for row in self.repository.list(user_id)] if connection else []
+        return [self.view(row, connection) for row in self.repository.list(user_id, conversation_id)] if connection else []
+
+    def list_events(self, user_id, query: CalendarEventQuery, timezone_name: str):
+        connection = self.connection(user_id)
+        start = query.start or datetime.now(ZoneInfo(timezone_name)).replace(microsecond=0)
+        end = query.end or start + timedelta(days=7)
+        path = "/calendars/" + quote(connection["calendar_id"], safe="") + "/events"
+        data = self.check(self.request(connection, "GET", path, params={
+            "timeMin": start.isoformat(), "timeMax": end.isoformat(), "timeZone": timezone_name,
+        }))
+        if not isinstance(data.get("events"), list):
+            raise AppError("Google Calendar returned an incomplete event list. Please retry.", "calendar_mcp_response", 502)
+        # Calendar text is untrusted source content. Return only schedule fields.
+        events = [{key: item[key] for key in ("id", "summary", "start", "end", "location", "recurringEventId") if key in item}
+                  for item in data["events"] if item.get("status") != "cancelled"]
+        return {"calendar": connection["calendar_label"], "start": start.isoformat(), "end": end.isoformat(),
+                "timezone": timezone_name, "events": events, "limited": bool(data.get("limited")),
+                "note": "Only the connected primary calendar was checked. All-day event end dates are exclusive."}
+
+    def propose_update(self, user_id, request: CalendarUpdateRequest, timezone_name, latest_message="", conversation_id=None):
+        connection = self.connection(user_id)
+        path = "/calendars/" + quote(connection["calendar_id"], safe="") + "/events/"
+        event_id = request.event_id
+        original = self.check(self.request(connection, "GET", path + event_id))
+        if request.scope == "series" and original.get("recurringEventId"):
+            event_id = original["recurringEventId"]
+            original = self.check(self.request(connection, "GET", path + quote(event_id, safe="")))
+        if request.scope == "series" and not original.get("recurrence"):
+            raise AppError("This is a single event. Choose event scope instead of an entire series.", "calendar_choose_occurrence", 400)
+        if original.get("recurringEventId") and "recurrence" in request.changes.model_fields_set:
+            raise AppError("Choose the entire series to change its repeat rule.", "calendar_choose_occurrence", 400)
+        if original.get("recurrence") and request.scope != "series":
+            raise AppError("Select a dated occurrence from the event list to change just that occurrence, or choose the entire series.", "calendar_choose_occurrence", 400)
+        if original.get("status") == "cancelled" or not original.get("etag"):
+            raise AppError("This event cannot be safely edited. Refresh its details and try again.", "calendar_event_changed", 409)
+        if not original.get("start", {}).get("dateTime") or not original.get("end", {}).get("dateTime"):
+            raise AppError("Editing all-day events is not supported yet. Choose a timed event.", "calendar_all_day_edit", 400)
+        base = {"title": original.get("summary") or "Untitled event", "start": original["start"]["dateTime"],
+                "end": original["end"]["dateTime"], "timezone": original["start"].get("timeZone") or timezone_name,
+                "description": original.get("description") or "", "location": original.get("location") or ""}
+        changes = request.changes.model_dump(exclude_unset=True)
+        event = CalendarEventDraft.model_validate({**base, **changes})
+        from app.services.calendar_intent import validate_latest_times
+        validate_latest_times(event, latest_message)
+        if "start" in changes or "end" in changes:
+            self.future(event)
+        occurrences(event)
+        before = {key: original[key] for key in ("summary", "start", "end", "description", "location", "recurrence", "reminders") if key in original}
+        stored = {"operation": "update", "draft": event.model_dump(mode="json"), "target": {
+            "id": event_id, "etag": original["etag"], "before": before, "scope": request.scope,
+            "recurrence_changed": "recurrence" in changes, "reminder_changed": "reminder_minutes" in changes}}
+        return self.view(self.repository.create(user_id, connection["id"], stored, conversation_id), connection)
 
     def edit(self, user_id, proposal_id, version, event):
-        self.future(event)
         connection = self.connection(user_id)
-        return self.view(self.repository.edit(user_id, proposal_id, version, event.model_dump(mode="json")), connection)
+        row = self.repository.get(user_id, proposal_id)
+        stored = row["event"]
+        if stored.get("operation") == "update":
+            previous = CalendarEventDraft.model_validate(stored["draft"])
+            if event.start != previous.start or event.end != previous.end:
+                self.future(event)
+            stored["target"]["recurrence_changed"] |= event.recurrence != previous.recurrence
+            stored["target"]["reminder_changed"] |= event.reminder_minutes != previous.reminder_minutes
+            stored["draft"] = event.model_dump(mode="json")
+        else:
+            self.future(event)
+            stored = event.model_dump(mode="json")
+        occurrences(event)
+        return self.view(self.repository.edit(user_id, proposal_id, version, stored), connection)
 
     def cancel(self, user_id, proposal_id, version):
         connection = self.connection(user_id)
@@ -213,6 +300,8 @@ class GoogleCalendar:
             raise AppError("The proposal changed. Review it again.", "proposal_conflict", 409)
         if row["status"] == "applied":
             return self.view(row, connection)
+        if row["event"].get("operation") == "update":
+            return self._approve_update(user_id, proposal_id, version, row, connection)
         if row["status"] == "pending":
             self.future(CalendarEventDraft.model_validate(row["event"]))
         row = self.repository.claim(user_id, proposal_id, version)
@@ -228,23 +317,23 @@ class GoogleCalendar:
                 checked_absent = True
                 event = CalendarEventDraft.model_validate(row["event"])
                 self.future(event)
+                slots = occurrences(event)
                 busy = self.check(self.request(connection, "POST", "/freeBusy", json={
-                    "timeMin": event.start.isoformat(), "timeMax": event.end.isoformat(),
+                    "timeMin": slots[0][0].isoformat(), "timeMax": slots[-1][1].isoformat(),
                     "items": [{"id": connection["calendar_id"]}],
                 }))
                 availability = busy.get("calendars", {}).get(connection["calendar_id"])
-                if availability is None or availability.get("errors"):
+                if availability is None or availability.get("errors") or not isinstance(availability.get("busy"), list):
                     raise AppError("Could not verify calendar availability. Please try again.", "calendar_unavailable", 502)
-                if availability.get("busy"):
+                try:
+                    overlaps = any(datetime.fromisoformat(block["start"].replace("Z", "+00:00")) < end and datetime.fromisoformat(block["end"].replace("Z", "+00:00")) > start
+                                   for block in availability.get("busy", []) for start, end in slots)
+                except (KeyError, ValueError, TypeError) as exc:
+                    raise AppError("Could not verify every occurrence's availability. Please retry.", "calendar_unavailable", 502) from exc
+                if overlaps:
                     raise AppError("This time overlaps an existing event. Edit the proposal and review it again.", "calendar_busy", 409)
-                body = {
-                    "id": event_id, "summary": event.title, "description": event.description,
-                    "location": event.location,
-                    "start": {"dateTime": event.start.isoformat(), "timeZone": event.timezone},
-                    "end": {"dateTime": event.end.isoformat(), "timeZone": event.timezone},
-                    "reminders": {"useDefault": False},
-                    "extendedProperties": {"private": {"trojanclaw_proposal": str(proposal_id)}},
-                }
+                body = {**event_body(event), "id": event_id,
+                        "extendedProperties": {"private": {"trojanclaw_proposal": str(proposal_id)}}}
                 confirmed_absent = False
                 existing = self.request(connection, "POST", path, json=body)
                 if existing.status_code == 409:
@@ -261,6 +350,40 @@ class GoogleCalendar:
             # use the same event ID; editing/cancelling cannot hide a possible write.
             rejected_before_write = checked_absent and isinstance(exc, AppError) and exc.code == "calendar_mcp_schema"
             self.repository.release(user_id, proposal_id, conflict=confirmed_absent or rejected_before_write)
+            raise
+
+    def _approve_update(self, user_id, proposal_id, version, row, connection):
+        row = self.repository.claim(user_id, proposal_id, version)
+        target = row["event"]["target"]
+        event = CalendarEventDraft.model_validate(row["event"]["draft"])
+        path = "/calendars/" + quote(connection["calendar_id"], safe="") + "/events/" + quote(target["id"], safe="")
+        before_write = True
+        try:
+            current = self.check(self.request(connection, "GET", path))
+            marker = current.get("extendedProperties", {}).get("private", {}).get("trojanclaw_proposal")
+            if marker == str(proposal_id):
+                before_write = False  # A previous attempt already changed Google.
+            if marker != str(proposal_id):
+                if current.get("etag") != target["etag"] or current.get("status") == "cancelled":
+                    raise AppError("This event changed since you reviewed it. Ask for a fresh edit proposal.", "calendar_event_changed", 409)
+                body = event_body(event)
+                if not target["recurrence_changed"]:
+                    body.pop("recurrence", None)
+                elif event.recurrence is None:
+                    body["recurrence"] = []
+                if not target["reminder_changed"]:
+                    body.pop("reminders", None)
+                properties = current.get("extendedProperties") or {}
+                body["extendedProperties"] = {**properties, "private": {**properties.get("private", {}), "trojanclaw_proposal": str(proposal_id)}}
+                before_write = False
+                current = self.check(self.request(connection, "PATCH", path, json=body,
+                                                   expected_etag=target["etag"], approved_proposal=str(proposal_id)))
+                if current.get("extendedProperties", {}).get("private", {}).get("trojanclaw_proposal") != str(proposal_id):
+                    raise AppError("Could not confirm the calendar update. Retry to check its result.", "calendar_update_uncertain", 502)
+            saved = self.repository.applied(user_id, proposal_id, safe_event_url(current.get("htmlLink")))
+            return self.view(saved, connection)
+        except Exception as exc:
+            self.repository.release(user_id, proposal_id, conflict=before_write or (isinstance(exc, AppError) and exc.code == "calendar_event_changed"))
             raise
 
 

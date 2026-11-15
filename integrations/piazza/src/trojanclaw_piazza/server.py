@@ -14,6 +14,8 @@ from mcp_piazza.config import Settings
 from mcp_piazza.tools import register_all
 import requests
 
+from .links import linked
+
 READ_TOOLS = frozenset({
     "list_courses", "get_course_info", "get_course_stats", "list_posts", "search_posts",
     "get_post", "get_posts", "get_post_history", "recent_activity", "get_unread_counts", "list_instructor_notes",
@@ -133,7 +135,7 @@ class ReadRegistrar:
             if function.__name__ in READ_TOOLS:
                 options["annotations"] = {"readOnlyHint": True, "destructiveHint": False,
                                           "idempotentHint": False, "openWorldHint": True}
-                self.server.tool(**options)(function)
+                self.server.tool(**options)(linked(function))  # posts and courses get piazza.com links
                 self.registered.add(function.__name__)
             return function
         return decorate

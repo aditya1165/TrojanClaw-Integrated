@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from psycopg2.extensions import adapt
 
 from app.config import ConfigurationError
-from app.dependencies import get_chat_service
+from app.dependencies import get_conversation_repository
 from app.main import app
 from app.repositories.documents import DocumentRepository
 
@@ -71,15 +71,13 @@ def test_campus_search_parameters_adapt_and_are_shared_across_users() -> None:
     ],
 )
 def test_chat_maps_dependency_errors_without_leaking_details(error, status, code) -> None:
-    class FailingChatService:
-        async def chat(self, _request, *, user_id, use_saved_connectors=False):
+    class FailingConversations:
+        def create(self, user_id, title):
             raise error
 
-    app.dependency_overrides[get_chat_service] = lambda: FailingChatService()
+    app.dependency_overrides[get_conversation_repository] = lambda: FailingConversations()
     try:
-        response = TestClient(app).post(
-            "/chat", json={"messages": [{"role": "user", "content": "Hi"}]}
-        )
+        response = TestClient(app).post("/chat", json={"message": "Hi"})
     finally:
         app.dependency_overrides.clear()
 

@@ -1,58 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "../lib/api";
-import type { CalendarEventDraft, CalendarProposal, CalendarStatus } from "../lib/api";
+import type { CalendarEventDraft, CalendarProposal } from "../lib/api";
 import { Button, CalendarIcon } from "./ui";
-
-export function CalendarConnection() {
-  const [status, setStatus] = useState<CalendarStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(() => new URLSearchParams(window.location.search).get("calendar_error") || "");
-  const load = useCallback(() => apiRequest<CalendarStatus>("/calendar/status").then(setStatus), []);
-
-  useEffect(() => {
-    let active = true;
-    apiRequest<CalendarStatus>("/calendar/status")
-      .then((value) => { if (active) setStatus(value); })
-      .catch((reason: Error) => { if (active) setError(reason.message); });
-    return () => { active = false; };
-  }, []);
-
-  const act = async (action: "connect" | "disconnect") => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (action === "connect") {
-        const { url } = await apiRequest<{ url: string }>("/calendar/connect", {});
-        window.location.assign(url);
-      } else {
-        await apiRequest<void>("/calendar/disconnect", {});
-        await load();
-        window.dispatchEvent(new Event("calendar-updated"));
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not update calendar connection.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return <section aria-label="Google Calendar" className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 text-sm">
-    <div className="flex items-center gap-2 font-medium"><CalendarIcon />Google Calendar</div>
-    <p className="break-words text-xs text-muted">{status?.connected ? `Connected: ${status.calendar}` : status?.configured ? "Connect to add events from chat." : status ? "Calendar connection needs setup." : "Checking connection…"}</p>
-    <p className="text-xs text-muted">Every calendar addition needs your approval.</p>
-    {error && <p role="alert" className="text-xs text-error">{error}</p>}
-    <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" disabled={!status?.configured || busy} onClick={() => act("connect")}>{busy ? "Working…" : status?.connected ? "Reconnect" : "Connect"}</Button>
-      {status?.connected && <Button variant="ghost" disabled={busy} onClick={() => act("disconnect")}>Disconnect</Button>}
-    </div>
-    {status?.connected && <p className="text-xs text-muted">Disconnecting removes access and drafts. Events already saved stay in Google Calendar.</p>}
-  </section>;
-}
 
 function formatTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(new Date(value));
 }
+
+const weekdayNames: Record<string, string> = { MO: "Monday", TU: "Tuesday", WE: "Wednesday", TH: "Thursday", FR: "Friday", SA: "Saturday", SU: "Sunday" };
 
 function localTime(value: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -117,6 +72,7 @@ function ProposalCard({ proposal, onChange }: { proposal: CalendarProposal; onCh
     const form = new FormData(formEvent.currentTarget);
     try {
       void act("edit", {
+        ...event,
         title: String(form.get("title")), start: zonedTime(String(form.get("start")), event.timezone),
         end: zonedTime(String(form.get("end")), event.timezone), timezone: event.timezone,
         description: String(form.get("description")), location: String(form.get("location")),
@@ -128,13 +84,30 @@ function ProposalCard({ proposal, onChange }: { proposal: CalendarProposal; onCh
 
   const inputClass = "w-full rounded-lg border border-line bg-bg px-3 py-2 text-fg";
   return <article aria-label={`Calendar proposal: ${event.title}`} className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5 text-sm">
-    <div className="flex items-center gap-2 font-semibold"><CalendarIcon />{proposal.status === "applied" ? "Added to Google Calendar" : proposal.status === "cancelled" ? "Proposal cancelled" : "Review calendar addition"}</div>
+    <div className="flex items-center gap-2 font-semibold"><CalendarIcon />{proposal.status === "applied" ? proposal.operation === "update" ? "Updated in Google Calendar" : "Added to Google Calendar" : proposal.status === "cancelled" ? "Proposal cancelled" : proposal.operation === "update" ? "Review calendar changes" : "Review calendar addition"}</div>
+    {proposal.before && <div className="rounded-lg border border-line p-3 text-muted">
+      <p className="font-medium">Before: {proposal.before.summary || "Untitled event"}</p>
+      {proposal.before.start?.dateTime && proposal.before.end?.dateTime && <p>{formatTime(proposal.before.start.dateTime, event.timezone)} – {formatTime(proposal.before.end.dateTime, event.timezone)}</p>}
+      {proposal.before.location && <p>Location: {proposal.before.location}</p>}
+      {proposal.before.description && <p className="whitespace-pre-wrap">{proposal.before.description}</p>}
+      {!!proposal.before.recurrence?.length && <p>This is a recurring series. Its repeat rule stays unchanged unless a new rule is shown below.</p>}
+      <p className="mt-2 font-medium">Scope: {proposal.scope === "series" ? "Entire recurring series, including past occurrences" : "This event or occurrence only"}</p>
+      <p>After approval, the details below replace the event details shown above. Existing guests stay unchanged.</p>
+    </div>}
     <p className="font-medium">{event.title}</p>
     <p>{formatTime(event.start, event.timezone)} – {formatTime(event.end, event.timezone)}</p>
+    {event.recurrence && <div className="rounded-lg border border-line p-3">
+      <p>Repeats: every {event.recurrence.interval === 1 ? "" : `${event.recurrence.interval} `}{({ DAILY: "day", WEEKLY: "week", MONTHLY: "month" })[event.recurrence.frequency]}{event.recurrence.interval > 1 ? "s" : ""}{event.recurrence.weekdays.length ? ` on ${event.recurrence.weekdays.map(day => weekdayNames[day] || day).join(", ")}` : ""}.</p>
+      <p>{event.recurrence.count ? `${event.recurrence.count} occurrences` : `Ends on ${event.recurrence.until}`}. {proposal.occurrences?.length ? `${proposal.occurrences.length} scheduled occurrences.` : ""}</p>
+      {!!proposal.occurrences?.length && <details><summary className="cursor-pointer underline">Review every occurrence</summary>{proposal.occurrences.map(slot => <p key={slot.start}>{formatTime(slot.start, event.timezone)} – {formatTime(slot.end, event.timezone)}</p>)}</details>}
+    </div>}
+    {event.reminder_minutes != null && <p>Popup reminder: {event.reminder_minutes === 0 ? "At event start" : `${event.reminder_minutes} minutes before start`}.</p>}
+    {proposal.operation === "update" && proposal.reminder_changed && event.reminder_minutes == null && <p>After approval: remove existing reminders.</p>}
+    {proposal.operation === "update" && proposal.recurrence_changed && !event.recurrence && <p>After approval: stop repeating; keep one event.</p>}
     <p className="break-words text-muted">Time zone: {event.timezone}<br />Calendar: {proposal.calendar}</p>
     {event.location && <p className="whitespace-pre-wrap">Location: {event.location}</p>}
     {event.description && <p className="whitespace-pre-wrap">{event.description}</p>}
-    {(pending || proposal.status === "approved") && <p className="text-xs text-muted">One event. No guests, recurrence, or reminders. {pending ? "Nothing has been added yet." : "Saving was requested. Retry to confirm the result without creating a duplicate."}</p>}
+    {(pending || proposal.status === "approved") && <p className="text-xs text-muted">{proposal.operation === "update" ? "Existing recurrence and reminder settings stay unchanged unless a new setting is shown above. Guest notifications are not sent. " : "No guests. "}{pending ? "Nothing has been changed in Google Calendar yet." : "Saving was requested. Retry to confirm the result safely."}</p>}
     {expired && <p role="status" className="text-muted">This proposal expired. Ask chat for a new proposal.</p>}
     {error && <p role="alert" className="text-error">{error}</p>}
     {editing ? <form onSubmit={saveEdit} className="flex flex-col gap-3">
@@ -146,14 +119,15 @@ function ProposalCard({ proposal, onChange }: { proposal: CalendarProposal; onCh
       <label>Description<textarea name="description" maxLength={4000} defaultValue={event.description} className={inputClass} /></label>
       <div className="flex gap-2"><Button type="submit" disabled={busy}>Save draft for review</Button><Button variant="ghost" disabled={busy} onClick={() => setEditing(false)}>Back</Button></div>
     </form> : <div className="flex flex-wrap gap-2">
-      {(pending || proposal.status === "approved") && <Button disabled={busy || expired} onClick={() => act("approve")}>{busy ? "Working…" : proposal.status === "approved" ? "Retry save" : "Approve addition"}</Button>}
+      {(pending || proposal.status === "approved") && <Button disabled={busy || expired} onClick={() => act("approve")}>{busy ? "Working…" : proposal.status === "approved" ? "Retry save" : proposal.operation === "update" ? "Approve changes" : "Approve addition"}</Button>}
       {pending && <><Button variant="secondary" disabled={busy || expired} onClick={() => setEditing(true)}>Edit</Button><Button variant="ghost" disabled={busy} onClick={() => act("cancel")}>Cancel</Button></>}
       {proposal.status === "applied" && proposal.event_url && <a href={proposal.event_url} target="_blank" rel="noopener noreferrer" className="py-2 underline">Open in Google Calendar</a>}
     </div>}
   </article>;
 }
 
-export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
+/** Drafts created by one chat. A new chat with no saved messages has none. */
+export function CalendarProposals({ refreshKey, conversationId }: { refreshKey: string; conversationId: string | null }) {
   const [proposals, setProposals] = useState<CalendarProposal[]>([]);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -193,11 +167,12 @@ export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
   useEffect(() => {
     let active = true;
     const sequence = ++requestSequence.current;
-    apiRequest<CalendarProposal[]>("/calendar/proposals")
+    if (!conversationId) return () => { active = false; };
+    apiRequest<CalendarProposal[]>(`/calendar/proposals?conversation_id=${encodeURIComponent(conversationId)}`)
       .then((values) => { if (active && sequence === requestSequence.current) { setProposals(values); setError(""); } })
       .catch((reason: Error) => { if (active && sequence === requestSequence.current) setError(reason.message); });
     return () => { active = false; };
-  }, [refreshKey, revision]);
+  }, [refreshKey, revision, conversationId]);
 
   const recentId = recentResult?.refreshKey === refreshKey ? recentResult.id : null;
   const replyProposals = proposals.filter((proposal) => replyProposalIds === null || replyProposalIds.has(proposal.id));

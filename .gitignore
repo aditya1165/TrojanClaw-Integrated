@@ -1,51 +1,48 @@
-# Global
-.DS_Store
-*.log
+# ---- Secrets (only the .example templates are committed) ----
 .env
 .env.*
 !.env.example
 
-# Python / Backend
+# ---- Local tooling ----
+.agents/
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# ---- Python ----
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 *.so
+.venv/
+venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .uv-cache/
-.runtime/
 .coverage
 htmlcov/
-.venv/
-venv/
-backend/.venv/
-backend/venv/
-backend/.pytest_cache/
-backend/.mypy_cache/
-backend/.ruff_cache/
+*.egg-info/
 
-# Private course data (Piazza exports, downloads)
-backend/data/
-.handshake-mcp/
-integrations/connector_cookies.json
-integrations/.connector-cookies-*
-
-# Node / Frontend
+# ---- Node / frontend ----
 node_modules/
-frontend/node_modules/
-frontend/dist/
+dist/
+build/
 frontend/.vite/
 frontend/coverage/
 frontend/.eslintcache
 integrations/google-calendar/.generated/
 
-# Build artifacts
-build/
-dist/
-*.egg-info/
+# ---- Local runtimes and private data ----
+.runtime/
+backend/data/
+.handshake-mcp/
+integrations/connector_cookies.json
+integrations/.connector-cookies-*
 *.docx
 
-# Supabase CLI local link and runtime metadata
+# ---- Supabase CLI ----
 supabase/.temp/

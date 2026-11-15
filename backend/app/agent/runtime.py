@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
+import re
 import time
 from typing import Any, Callable, Protocol
 from uuid import UUID
@@ -34,6 +35,8 @@ from mcp.server.mcpserver import MCPServer
 
 from app.agent.config import AgentConfig
 from app.errors import AppError, DependencyUnavailableError
+from app.services.answer_cards import verify_cards
+from app.services.sources import activity_for, cited_links, collect_links
 
 _DEFAULT_TIMEZONE = "America/Los_Angeles"
 _LOG = logging.getLogger(__name__)
@@ -42,6 +45,8 @@ _SAVED_STATES = {"saved", "connected"}
 
 # Builds the TrojanClaw MCP server for one student.
 McpServerFactory = Callable[[UUID], MCPServer]
+# Receives progress while a run streams: {"type": "text" | "reset" | "activity", ...}.
+OnEvent = Callable[[dict[str, Any]], None]
 
 # Shown as the source when an answer used a live connector.
 _CONNECTOR_SOURCES = {
@@ -84,12 +89,15 @@ class AgentResult:
 class _RecordingClient:
     """Wraps the MCP client to record each tool call and the sources it returned."""
 
-    def __init__(self, client: Client):
+    def __init__(self, client: Client, on_event: OnEvent | None = None):
         self._client = client
+        self._on_event = on_event
         self.tool_calls: list[ToolCall] = []
         self.sources: list[dict[str, Any]] = []
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None, **kwargs: Any):
+        if self._on_event:
+            self._on_event({"type": "activity", "text": activity_for(name)})
         started = time.monotonic()
         result = await self._client.call_tool(name=name, arguments=arguments, **kwargs)
         is_error = bool(getattr(result, "is_error", False))
@@ -120,6 +128,27 @@ def _dedupe(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return unique
 
 
+_MAX_UNCITED_SOURCES = 5
+
+
+def _mentions(text: str, url: str) -> bool:
+    """The whole link appears in the text (so ...id=1 does not match ...id=13)."""
+    return re.search(re.escape(url) + r"(?![\w/?=&%~+-]|\.\w)", text) is not None
+
+
+def _cited_first(sources: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Sources the reply links to; if it links to none, the first few the tools returned.
+
+    A search tool returns many items (an events search lists 20-30); showing them all under
+    a reply that mentions three is noise. Connector entries (no specific page) are kept.
+    """
+    linked = [s for s in sources if s.get("kind") != "connector" and s.get("url") and _mentions(text, s["url"])]
+    others = [s for s in sources if s.get("kind") == "connector"]
+    if linked:
+        return linked + others
+    return [s for s in sources if s.get("kind") != "connector"][:_MAX_UNCITED_SOURCES] + others
+
+
 def _connector_tools(
     connectors: ConnectorTools,
     user_id: UUID,
@@ -127,14 +156,20 @@ def _connector_tools(
     providers: list[str],
     tool_calls: list[ToolCall],
     sources: list[dict[str, Any]],
+    links: dict[str, Any] | None = None,
+    on_event: OnEvent | None = None,
 ) -> list[Any]:
-    """Wrap connector tool definitions as runnable tools for the tool runner."""
+    """Wrap connector tool definitions as runnable tools for the tool runner.
+
+    Links found in results go into `links`, so the reply can show the ones it cites."""
 
     def make(definition: dict[str, Any]) -> Any:
         name = definition["name"]
         provider = name.partition("__")[0]
 
         async def call(**arguments: Any) -> str:
+            if on_event:
+                on_event({"type": "activity", "text": activity_for(name)})
             started = time.monotonic()
             try:
                 # Blocking subprocess call (up to ~100 s); keep the event loop free.
@@ -145,6 +180,8 @@ def _connector_tools(
             tool_calls.append(ToolCall(name, arguments, False, int((time.monotonic() - started) * 1000)))
             if provider in _CONNECTOR_SOURCES:
                 sources.append(dict(_CONNECTOR_SOURCES[provider], course=None))
+            if links is not None:
+                collect_links(result, provider, links)
             return result
 
         return beta_async_tool(
@@ -173,6 +210,30 @@ def _state(status: Any) -> str:
 def _provider(status: Any) -> str:
     provider = getattr(status, "provider", None)
     return str(getattr(provider, "value", provider))
+
+
+# Models that accept a {"role": "system"} message inside `messages` (no beta header needed).
+# Others (for example claude-sonnet-5) return a 400 for it, so they keep the context in `system`.
+_MID_CONVERSATION_SYSTEM = (
+    "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-mythos-5",
+)
+
+
+def _with_context(
+    instructions: str, messages: list[dict[str, Any]], context: str, model: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Request `system` and `messages`, laid out for prompt caching.
+
+    Tools and the fixed instructions carry an explicit cache breakpoint, and the top-level
+    automatic breakpoint caches the conversation. The context (date and time to the minute,
+    connectors, caller notes) changes on every request, so it goes in a system message after
+    the conversation: then the next message in the chat re-reads the earlier turns from the
+    cache. Inside `system` it would sit before the history and make the history miss.
+    """
+    system = [{"type": "text", "text": instructions, "cache_control": {"type": "ephemeral"}}]
+    if model.startswith(_MID_CONVERSATION_SYSTEM) and messages and messages[-1].get("role") == "user":
+        return system, [*messages, {"role": "system", "content": context}]
+    return system + [{"type": "text", "text": context}], messages
 
 
 def _now_line(timezone: str) -> str:
@@ -205,6 +266,10 @@ class AgentRuntime:
     @property
     def config(self) -> AgentConfig:
         return self._config
+
+    def anthropic(self) -> AsyncAnthropic:
+        """The shared Anthropic client (chat titles use it too)."""
+        return self._anthropic()
 
     def _anthropic(self) -> AsyncAnthropic:
         if self._client is None:
@@ -261,36 +326,44 @@ class AgentRuntime:
         extra_tools: Sequence[Any] = (),
         extra_instructions: str | None = None,
         include_goal_tools: bool = True,
+        on_event: OnEvent | None = None,
+        allowed_connectors: Sequence[str] | None = None,
     ) -> AgentResult:
         """Run a goal for one student.
 
         `extra_tools` (runnable tool-runner tools) and `extra_instructions` are added by the
         caller. With `include_goal_tools=False` Claude gets only `extra_tools` (no MCP or
         connector tools), for a narrow follow-up step.
+
+        With `on_event` the reply streams: {"type": "text"} as it is written, {"type": "reset"}
+        when text so far was only a lead-in to tool calls, and {"type": "activity"} per tool call.
+
+        `allowed_connectors` limits connectors further than the goal's list: the sources the
+        student turned on in chat. None means no extra limit.
         """
         goal_config = self._config.goal(goal)
         anthropic = self._anthropic()
         providers, definitions = (
             await self._connector_definitions_for(
-                user_id, goal_config.connectors, connectors, use_saved_connectors
+                user_id,
+                [p for p in goal_config.connectors if allowed_connectors is None or p in allowed_connectors],
+                connectors, use_saved_connectors,
             )
             if include_goal_tools
             else ([], [])
         )
-        # The instructions are fixed text; the date, sources and caller notes go in a second block.
+        # The instructions are fixed text; the date, sources and caller notes change per request.
         context = _now_line(timezone) + "\n" + _connectors_line(providers)
         if extra_instructions:
             context += "\n\n" + extra_instructions
-        system = [
-            {"type": "text", "text": self._config.system_prompt},
-            {"type": "text", "text": context},
-        ]
+        system, messages = _with_context(self._config.system_prompt, messages, context, goal_config.model)
         extra: dict[str, Any] = dict(self._config.request_options)
         if goal_config.effort:
             extra["output_config"] = {"effort": goal_config.effort}
 
+        links: dict[str, Any] = {}
         async with Client(self._server_for_user(user_id)) as mcp_client:
-            recorder = _RecordingClient(mcp_client)
+            recorder = _RecordingClient(mcp_client, on_event)
             listed = await mcp_client.list_tools()
             tools = [
                 async_mcp_tool(tool, recorder)  # type: ignore[arg-type]  # duck-typed call_tool
@@ -301,19 +374,23 @@ class AgentRuntime:
                 assert self._connectors is not None
                 tools += _connector_tools(
                     self._connectors, user_id, definitions, providers,
-                    recorder.tool_calls, recorder.sources,
+                    recorder.tool_calls, recorder.sources, links, on_event,
                 )
             tools += list(extra_tools)
-            runner = anthropic.beta.messages.tool_runner(
+            request = dict(
                 model=goal_config.model,
                 max_tokens=self._config.max_tokens,
                 system=system,
                 tools=tools,
                 messages=messages,
                 max_iterations=goal_config.max_tool_rounds,
+                cache_control={"type": "ephemeral"},
                 **extra,
             )
-            final = await runner.until_done()
+            if on_event is None:
+                final = await anthropic.beta.messages.tool_runner(**request).until_done()
+            else:
+                final = await _stream(anthropic.beta.messages.tool_runner(**request, stream=True), on_event)
 
         text = "\n".join(
             block.text for block in final.content if getattr(block, "type", None) == "text"
@@ -325,10 +402,43 @@ class AgentRuntime:
                 "I couldn't finish answering within the allowed number of steps. "
                 "Please try a more specific question."
             )
+        # Result cards may only link to pages a tool returned in this run.
+        known_urls = set(links) | {s["url"] for s in recorder.sources if isinstance(s.get("url"), str)}
+        text = verify_cards(text, known_urls)
+        sources = _cited_first(_dedupe(recorder.sources), text)
+        cited = cited_links(text, links)
+        if cited:
+            # Specific links the reply cites replace the connector's home page.
+            providers = {item.pop("provider") for item in cited}
+            sources = cited + [s for s in sources if not (s.get("kind") == "connector" and s.get("title", "").lower() in providers)]
         return AgentResult(
             text=text,
-            sources=_dedupe(recorder.sources),
+            sources=sources,
             tool_calls=recorder.tool_calls,
             stop_reason=final.stop_reason,
             model=getattr(final, "model", None),
         )
+
+
+def _log_usage(message: Any) -> None:
+    """One line per model call, so token use (and cache hits) can be checked in the backend log."""
+    usage = getattr(message, "usage", None)
+    if usage is not None:
+        _LOG.info("Claude call: input=%s cache_read=%s cache_write=%s output=%s",
+                  getattr(usage, "input_tokens", 0), getattr(usage, "cache_read_input_tokens", 0),
+                  getattr(usage, "cache_creation_input_tokens", 0), getattr(usage, "output_tokens", 0))
+
+
+async def _stream(runner: Any, on_event: OnEvent) -> Any:
+    """Pass the reply's text on as it is written; return the last message."""
+    async for stream in runner:
+        wrote = False
+        async for event in stream:
+            if event.type == "content_block_delta" and getattr(event.delta, "type", None) == "text_delta":
+                wrote = True
+                on_event({"type": "text", "text": event.delta.text})
+        message = await stream.get_final_message()
+        _log_usage(message)
+        if wrote and any(getattr(block, "type", None) == "tool_use" for block in message.content):
+            on_event({"type": "reset"})  # that text led into tool calls; the answer comes next
+    return await runner.until_done()
