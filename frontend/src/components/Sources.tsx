@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { apiRequest, type ConnectorProvider } from "../lib/api";
-import { activeSources, INFO, LIVE, usable, USC, type Sources, type State } from "../lib/sources";
+import { activeSources, INFO, LIVE, usable, type Sources, type State } from "../lib/sources";
 import { EventsDialog } from "./EventsDialog";
-import { Button, CloseIcon, LockIcon } from "./ui";
+import { CloseIcon } from "./ui";
 import { toast } from "../lib/toast";
 
 const LABEL: Record<State, string> = {
@@ -45,7 +45,6 @@ function MenuRow({ id, note, children }: { id: keyof typeof INFO; note: string; 
 }
 
 const ROW = "flex min-h-12 items-center gap-3 rounded-xl px-3";
-const CHECK = "h-[18px] w-[18px] flex-none accent-accent";
 const LINK = "min-h-9 flex-none text-[13px] font-medium text-accent-fg hover:underline disabled:opacity-50";
 
 /** Option C: the "Sources" button in the chat box and its checklist. */
@@ -89,29 +88,29 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
           {LIVE.map((provider) => {
             const state = sources.stateOf(provider);
             return usable(state) ? (
-              <label key={provider} className={`${ROW} cursor-pointer hover:bg-subtle`}>
-                <MenuRow id={provider} note={LABEL[state]} />
-                <input type="checkbox" className={CHECK} checked={selected.includes(provider)}
-                  onChange={(event) => toggle(provider, event.target.checked)} />
-              </label>
+              <div key={provider} className={ROW}>
+                <MenuRow id={provider} note={LABEL[state]}>
+                  <Switch label={`Use ${INFO[provider].name} in chat`} on={selected.includes(provider)} onChange={(on) => toggle(provider, on)} />
+                </MenuRow>
+              </div>
             ) : (
               <div key={provider} className={ROW} title={sources.messageOf(provider) ?? undefined}>
-                <MenuRow id={provider} note={state === "needs_login" && sources.messageOf(provider) ? sources.messageOf(provider)! : LABEL[state]}>
+                <MenuRow id={provider} note={LABEL[state]}>
                   {state === "connecting" || sources.busy.includes(provider)
                     ? <span className="flex-none text-[13px] text-muted">Signing in…</span>
-                    : <button type="button" className={LINK} onClick={() => connectNow(provider)}>{state === "needs_login" ? "Sign in" : "Connect"}</button>}
+                    : <button type="button" className={LINK} onClick={() => connectNow(provider)}>{state === "needs_login" ? "Reconnect" : "Connect"}</button>}
                 </MenuRow>
               </div>
             );
           })}
-          <label className={`${ROW} cursor-pointer hover:bg-subtle`}>
-            <MenuRow id="engagesc" note="Public campus events" />
-            <input type="checkbox" className={CHECK} checked={Boolean(sources.engage)}
-              disabled={sources.engage === null || sources.busy.includes("engagesc")}
-              onChange={(event) => void sources.setEngage(event.target.checked)} />
-          </label>
           <div className={ROW}>
-            <MenuRow id="calendar" note={sources.calendar?.connected ? "Drafts events for your approval" : "Not connected"}>
+            <MenuRow id="engagesc" note="Campus events">
+              <Switch label="Use EngageSC in chat" on={Boolean(sources.engage)} onChange={(on) => void sources.setEngage(on)}
+                disabled={sources.engage === null || sources.busy.includes("engagesc")} />
+            </MenuRow>
+          </div>
+          <div className={ROW}>
+            <MenuRow id="calendar" note={sources.calendar?.connected ? "Connected" : "Not connected"}>
               {!sources.calendar?.connected && (
                 <button type="button" className={LINK} disabled={!sources.calendar?.configured || sources.busy.includes("calendar")}
                   onClick={() => void sources.setCalendar(true)}>
@@ -132,7 +131,7 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
   );
 }
 
-/** Option A: the Sources window for connecting, reconnecting and turning sources on or off. */
+/** The Sources window: one row per source, with one control each. */
 export function SourcesDialog({ sources, selected, onChange, onClose }: {
   sources: Sources;
   selected: ConnectorProvider[];
@@ -141,6 +140,8 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
 }) {
   const [showEvents, setShowEvents] = useState(false);
   const { calendar, engage } = sources;
+  const toggle = (provider: ConnectorProvider, on: boolean) =>
+    onChange(on ? [...selected.filter((item) => item !== provider), provider] : selected.filter((item) => item !== provider));
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !showEvents) onClose(); };
@@ -152,140 +153,97 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4 py-6"
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="sources-title"
-        className="flex max-h-full w-full max-w-xl flex-col gap-5 overflow-y-auto rounded-2xl bg-surface p-6 text-fg shadow-xl sm:p-7">
-        <div className="flex items-start gap-4">
-          <div className="flex flex-1 flex-col gap-1.5">
-            <h2 id="sources-title" className="text-[22px] font-semibold tracking-[-0.02em]">Your sources</h2>
-            <p className="text-sm leading-relaxed text-muted">TrojanClaw reads these to answer you. Turn one off to leave it out of chat.</p>
-          </div>
+        className="flex max-h-full w-full max-w-md flex-col gap-4 overflow-y-auto rounded-2xl bg-surface p-5 text-fg shadow-xl">
+        <div className="flex items-center justify-between">
+          <h2 id="sources-title" className="text-lg font-semibold tracking-[-0.01em]">Sources</h2>
           <button type="button" aria-label="Close" onClick={onClose}
-            className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-subtle text-muted hover:text-fg">
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-subtle hover:text-fg">
             <CloseIcon />
           </button>
         </div>
 
-        <h3 className="text-xs font-semibold tracking-[0.06em] text-muted uppercase">Connected with your USC login</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {USC.map((provider) => <ConnectorCard key={provider} provider={provider} sources={sources} selected={selected} onChange={onChange} />)}
-        </div>
+        <ul className="flex flex-col divide-y divide-line rounded-xl border border-line">
+          {LIVE.map((provider) => {
+            const state = sources.stateOf(provider);
+            const waiting = state === "connecting" || sources.busy.includes(provider);
+            return (
+              <Row key={provider} id={provider} status={<Status state={state} />} hint={sources.messageOf(provider)}>
+                {usable(state) && !waiting
+                  ? <Switch label={`Use ${INFO[provider].name} in chat`} on={selected.includes(provider)} onChange={(on) => toggle(provider, on)} />
+                  : <SmallButton disabled={waiting || !sources.connectors} onClick={() => void sources.connect(provider, "connect")}>
+                      {waiting ? "Signing in…" : state === "needs_login" ? "Reconnect" : "Connect"}
+                    </SmallButton>}
+              </Row>
+            );
+          })}
 
-        <h3 className="mt-1 text-xs font-semibold tracking-[0.06em] text-muted uppercase">Separate sign-in</h3>
-        <ConnectorCard provider="piazza" sources={sources} selected={selected} onChange={onChange} />
+          <Row id="calendar" status={<span className="truncate">{calendar?.connected ? calendar.calendar : calendar && !calendar.configured ? "Not set up" : "Not connected"}</span>}>
+            {calendar?.connected
+              ? <button type="button" className={LINK} disabled={sources.busy.includes("calendar")} onClick={() => void sources.setCalendar(false)}>Disconnect</button>
+              : <SmallButton disabled={!calendar?.configured || sources.busy.includes("calendar")} onClick={() => void sources.setCalendar(true)}>
+                  {sources.busy.includes("calendar") ? "Opening…" : "Connect"}
+                </SmallButton>}
+          </Row>
 
-        <h3 className="mt-1 text-xs font-semibold tracking-[0.06em] text-muted uppercase">More sources</h3>
-        <div className="flex flex-col divide-y divide-line rounded-2xl border border-line">
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-            <Tile id="calendar" />
-            <div className="flex min-w-[180px] flex-1 flex-col gap-0.5">
-              <strong className="text-sm font-semibold">{INFO.calendar.name}</strong>
-              <span className="text-xs break-words text-muted">
-                {calendar?.connected ? `Connected: ${calendar.calendar}` : calendar && !calendar.configured ? "Needs setup on the server." : INFO.calendar.about}
-              </span>
-            </div>
-            {calendar?.connected ? (
-              <button type="button" className={LINK} disabled={sources.busy.includes("calendar")} onClick={() => void sources.setCalendar(false)}>Disconnect</button>
-            ) : (
-              <Button variant="secondary" className="min-h-9 px-3 text-[13px]" disabled={!calendar?.configured || sources.busy.includes("calendar")}
-                onClick={() => void sources.setCalendar(true)}>
-                {sources.busy.includes("calendar") ? "Opening…" : "Connect"}
-              </Button>
-            )}
-          </div>
+          <Row id="engagesc" status={engage ? <button type="button" className="text-accent-fg hover:underline" onClick={() => setShowEvents(true)}>Browse events</button> : "Campus events"}>
+            <Switch label="Use EngageSC in chat" on={Boolean(engage)} disabled={engage === null || sources.busy.includes("engagesc")}
+              onChange={(on) => void sources.setEngage(on)} />
+          </Row>
+
           <WebRegRow />
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-            <Tile id="engagesc" />
-            <div className="flex min-w-[180px] flex-1 flex-col gap-0.5">
-              <strong className="text-sm font-semibold">{INFO.engagesc.name}</strong>
-              <span className="text-xs text-muted">{INFO.engagesc.about}</span>
-            </div>
-            {engage && <button type="button" className={LINK} onClick={() => setShowEvents(true)}>View events</button>}
-            <button type="button" className={LINK} disabled={engage === null || sources.busy.includes("engagesc")}
-              onClick={() => void sources.setEngage(!engage)}>
-              {engage ? "Turn off" : "Turn on"}
-            </button>
-          </div>
-        </div>
+        </ul>
 
         {sources.error && <p role="alert" className="text-sm text-error">{sources.error}</p>}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="flex min-w-[220px] flex-1 items-center gap-2 text-xs text-muted">
-            <LockIcon />
-            Read-only. Calendar changes always need your approval.
-          </p>
-          <Button onClick={onClose} className="px-6">Done</Button>
-        </div>
       </section>
       {showEvents && <EventsDialog onClose={() => setShowEvents(false)} />}
     </div>
   );
 }
 
-/** One live connector: status, Connect or Sign in again, Check session, and Use in chat. */
-function ConnectorCard({ provider, sources, selected, onChange }: {
-  provider: ConnectorProvider;
-  sources: Sources;
-  selected: ConnectorProvider[];
-  onChange: (providers: ConnectorProvider[]) => void;
-}) {
-  const state = sources.stateOf(provider);
-  const message = sources.messageOf(provider);
-  const waiting = state === "connecting" || sources.busy.includes(provider);
+function Row({ id, status, hint, children }: { id: keyof typeof INFO | "webreg"; status: ReactNode; hint?: string | null; children?: ReactNode }) {
   return (
-    <article className="flex flex-col gap-3 rounded-2xl border border-line p-4">
-      <div className="flex items-center gap-3">
-        <Tile id={provider} />
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <strong className="text-[15px] font-semibold">{INFO[provider].name}</strong>
-          <Status state={state} />
-        </div>
+    <li className="flex min-h-14 items-center gap-3 px-3.5 py-2.5" title={hint ?? undefined}>
+      {id === "webreg"
+        ? <span aria-hidden="true" className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-[#7a1f1f] text-xs font-bold text-white">W</span>
+        : <Tile id={id} small />}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm font-medium">{id === "webreg" ? "WebReg" : INFO[id].name}</span>
+        <span className="flex min-w-0 text-xs text-muted">{status}</span>
       </div>
-      <p className="text-[13px] leading-snug text-muted">{INFO[provider].about}</p>
-      {message && state !== "connected" && <p className="text-xs break-words text-muted">{message}</p>}
-      {usable(state) ? (
-        <>
-          <label className="flex min-h-8 cursor-pointer items-center justify-between text-[13px]">
-            Use in chat
-            <input type="checkbox" className={CHECK} checked={selected.includes(provider)}
-              onChange={(event) => onChange(event.target.checked
-                ? [...selected.filter((item) => item !== provider), provider]
-                : selected.filter((item) => item !== provider))} />
-          </label>
-          <div className="flex flex-wrap gap-x-4">
-            <button type="button" className={LINK} disabled={waiting} onClick={() => void sources.connect(provider, "verify")}>Check session</button>
-            <button type="button" className={LINK} disabled={waiting} onClick={() => void sources.connect(provider, "connect")}>Sign in again</button>
-          </div>
-        </>
-      ) : (
-        <Button variant="secondary" disabled={waiting || !sources.connectors} onClick={() => void sources.connect(provider, "connect")}>
-          {waiting ? "Signing in…" : state === "needs_login" ? "Sign in again" : "Connect"}
-        </Button>
-      )}
-    </article>
+      {children}
+    </li>
   );
 }
 
-/** WebReg: the course bin is read at each Sign in with USC (read-only). */
+function Switch({ on, onChange, label, disabled = false }: { on: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
+      className={`relative h-6 w-10 flex-none rounded-full transition disabled:opacity-50 ${on ? "bg-accent" : "bg-line"}`}>
+      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+    </button>
+  );
+}
+
+function SmallButton({ children, ...props }: { children: ReactNode; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" {...props}
+      className="min-h-8 flex-none rounded-lg border border-line px-3 text-[13px] font-medium hover:bg-subtle disabled:opacity-50">
+      {children}
+    </button>
+  );
+}
+
+/** WebReg: the course bin is read at each Sign in with USC (read-only), so there is nothing to toggle. */
 function WebRegRow() {
-  const [info, setInfo] = useState<{ connected: boolean; updated_at: string | null; terms: { term: string; courses: number }[] } | null>(null);
+  const [info, setInfo] = useState<{ connected: boolean; terms: { term: string; courses: number }[] } | null>(null);
   useEffect(() => {
     let active = true;
     apiRequest<typeof info>("/integrations/webreg").then((value) => { if (active) setInfo(value); }).catch(() => {});
     return () => { active = false; };
   }, []);
-  const terms = info?.terms.filter((term) => term.courses > 0) ?? [];
+  const term = info?.terms.find((item) => item.courses > 0);
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-      <span aria-hidden="true" className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#7a1f1f] text-sm font-bold text-white">W</span>
-      <div className="flex min-w-[180px] flex-1 flex-col gap-0.5">
-        <strong className="text-sm font-semibold">WebReg</strong>
-        <span className="text-xs text-muted">
-          {!info ? "Checking…" : info.connected
-            ? `${terms.length ? terms.map((term) => `${term.term}: ${term.courses} course${term.courses === 1 ? "" : "s"}`).join(" · ") : "Course bin is empty"} · updated ${new Date(info.updated_at ?? "").toLocaleString()}`
-            : "Your course bin loads when you Sign in with USC."}
-        </span>
-      </div>
-      <span className="rounded-full bg-subtle px-2.5 py-1 text-xs text-muted">Read-only</span>
-    </div>
+    <Row id="webreg" status={!info ? "Checking…" : !info.connected ? "Loads when you sign in"
+      : term ? `${term.term} · ${term.courses} course${term.courses === 1 ? "" : "s"}` : "Course bin is empty"} />
   );
 }

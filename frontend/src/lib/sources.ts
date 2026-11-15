@@ -5,14 +5,13 @@ import { readSettings } from "./settings";
 
 export type State = ConnectorStatus["state"];
 
-export const INFO: Record<ConnectorProvider | "calendar" | "engagesc", { name: string; initial: string; tile: string; about: string }> = {
-  brightspace: { name: "Brightspace", initial: "B", tile: "bg-[#2b5f8a]", about: "Courses, assignments, grades and announcements." },
-  handshake: { name: "Handshake", initial: "H", tile: "bg-[#1f7a4d]", about: "Jobs, internships and career events." },
-  piazza: { name: "Piazza", initial: "P", tile: "bg-[#3e6fb0]", about: "Class Q&A threads. Signs in separately, not with your USC login." },
-  calendar: { name: "Google Calendar", initial: "G", tile: "bg-[#5c5752]", about: "Add events to your calendar after you approve them." },
-  engagesc: { name: "EngageSC", initial: "E", tile: "bg-[#990000]", about: "Public USC campus events. No sign-in needed." },
+export const INFO: Record<ConnectorProvider | "calendar" | "engagesc", { name: string; initial: string; tile: string }> = {
+  brightspace: { name: "Brightspace", initial: "B", tile: "bg-[#2b5f8a]" },
+  handshake: { name: "Handshake", initial: "H", tile: "bg-[#1f7a4d]" },
+  piazza: { name: "Piazza", initial: "P", tile: "bg-[#3e6fb0]" },
+  calendar: { name: "Google Calendar", initial: "G", tile: "bg-[#5c5752]" },
+  engagesc: { name: "EngageSC", initial: "E", tile: "bg-[#990000]" },
 };
-export const USC: ConnectorProvider[] = ["brightspace", "handshake"]; // connected by Sign in with USC
 export const LIVE: ConnectorProvider[] = ["brightspace", "handshake", "piazza"]; // usable in chat
 
 export const usable = (state?: State) => state === "connected" || state === "saved";
