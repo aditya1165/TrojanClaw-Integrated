@@ -6,12 +6,12 @@ from typing import Any
 
 import httpx
 import openai
-import psycopg2
 from psycopg2.extras import Json
 from dotenv import load_dotenv
 
 from app.scraper.chunker import chunk_text, clean_html
-from app.scraper.db_schema import ensure_documents_schema
+from app.database import connect_database
+from app.scraper.db_schema import validate_documents_schema
 
 try:
     from piazza_api import Piazza
@@ -255,43 +255,18 @@ def _fetch_posts_via_piazza_api(course_id: str, max_posts: int) -> list[dict[str
 
 
 def _dedupe_posts(posts: list[dict[str, str]]) -> list[dict[str, str]]:
-    seen: set[tuple[str, str]] = set()
+    # Key on post_id when present so the same post from the API and from an export
+    # collapses to one row, matching the (course_id, post_id) unique index.
+    seen: set[tuple[str, ...]] = set()
     output: list[dict[str, str]] = []
     for post in posts:
-        key = (post.get("source_url", ""), post.get("title", ""))
+        post_id = post.get("post_id")
+        key = ("id", str(post_id)) if post_id else ("url", post.get("source_url", ""), post.get("title", ""))
         if key in seen:
             continue
         seen.add(key)
         output.append(post)
     return output
-
-
-def _ensure_piazza_data_table(cur) -> None:
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS piazza_data (
-            id BIGSERIAL PRIMARY KEY,
-            course_id TEXT NOT NULL,
-            post_id TEXT,
-            title TEXT,
-            source_url TEXT,
-            content_text TEXT NOT NULL,
-            raw_payload JSONB,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_piazza_data_course_id ON piazza_data(course_id)
-        """
-    )
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_piazza_data_post_id ON piazza_data(post_id)
-        """
-    )
 
 
 def _store_raw_posts(cur, course_id: str, posts: list[dict[str, Any]]) -> None:
@@ -348,17 +323,10 @@ def sync_piazza_course_documents(course_id: str | None, max_posts: int = 200) ->
     Ingest Piazza course context into documents table as data_type='piazza_course'.
     Stores course identifier in the 'campus' column for retrieval filtering.
     """
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    if not supabase_url.startswith("postgres"):
-        raise ValueError("SUPABASE_URL must be a postgres connection string.")
-
     normalized_course = _normalize_course_id(course_id)
-    conn = psycopg2.connect(supabase_url)
+    conn = connect_database()
     cur = conn.cursor()
-    ensure_documents_schema(cur)
-    conn.commit()
-    _ensure_piazza_data_table(cur)
-    conn.commit()
+    validate_documents_schema(cur, include_piazza=True)
 
     posts = _fetch_piazza_documents(normalized_course)
     if not posts:
@@ -368,20 +336,10 @@ def sync_piazza_course_documents(course_id: str | None, max_posts: int = 200) ->
 
     client = _openai_client()
 
-    inserted = 0
+    # Embed everything before touching the database, so a failed embedding call
+    # cannot leave the course with its previous documents already deleted.
+    rows: list[tuple] = []
     try:
-        _store_raw_posts(cur, normalized_course, posts)
-
-        # Replace prior Piazza chunks for this course to avoid uncontrolled duplication.
-        cur.execute(
-            """
-            DELETE FROM documents
-            WHERE data_type = %s AND campus = %s
-            """,
-            ("piazza_course", normalized_course),
-        )
-        conn.commit()
-
         for post in posts[:max_posts]:
             metadata = {
                 "url": post["source_url"],
@@ -392,41 +350,58 @@ def sync_piazza_course_documents(course_id: str | None, max_posts: int = 200) ->
             chunks = chunk_text(post["content"], metadata=metadata, chunk_size=320, overlap=40)
             for chunk in chunks:
                 embedding = _embed_text(client, chunk["chunk_text"])
-                vec_str = "[" + ",".join(map(str, embedding)) + "]"
-                cur.execute(
-                    """
-                    INSERT INTO documents (
-                        source_url,
-                        page_title,
-                        data_type,
-                        campus,
-                        chunk_text,
-                        embedding,
-                        chunk_index,
-                        last_scraped
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (source_url, chunk_index)
-                    DO UPDATE SET
-                        page_title = EXCLUDED.page_title,
-                        data_type = EXCLUDED.data_type,
-                        campus = EXCLUDED.campus,
-                        chunk_text = EXCLUDED.chunk_text,
-                        embedding = EXCLUDED.embedding,
-                        last_scraped = NOW()
-                    """,
+                rows.append(
                     (
                         chunk["source_url"],
                         chunk["page_title"],
                         chunk["data_type"],
                         chunk["campus"],
                         chunk["chunk_text"],
-                        vec_str,
+                        "[" + ",".join(map(str, embedding)) + "]",
                         chunk.get("chunk_index", 0),
-                    ),
+                    )
                 )
-                inserted += 1
+    except Exception:
+        cur.close()
+        conn.close()
+        raise
 
+    # Replace raw posts and chunks in one transaction: either the new corpus is
+    # fully published or the previous one is kept.
+    try:
+        _store_raw_posts(cur, normalized_course, posts)
+        cur.execute(
+            """
+            DELETE FROM documents
+            WHERE data_type = %s AND campus = %s
+            """,
+            ("piazza_course", normalized_course),
+        )
+        for row in rows:
+            cur.execute(
+                """
+                INSERT INTO documents (
+                    source_url,
+                    page_title,
+                    data_type,
+                    campus,
+                    chunk_text,
+                    embedding,
+                    chunk_index,
+                    last_scraped
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (source_url, chunk_index)
+                DO UPDATE SET
+                    page_title = EXCLUDED.page_title,
+                    data_type = EXCLUDED.data_type,
+                    campus = EXCLUDED.campus,
+                    chunk_text = EXCLUDED.chunk_text,
+                    embedding = EXCLUDED.embedding,
+                    last_scraped = NOW()
+                """,
+                row,
+            )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -435,4 +410,5 @@ def sync_piazza_course_documents(course_id: str | None, max_posts: int = 200) ->
         cur.close()
         conn.close()
 
+    inserted = len(rows)
     return inserted

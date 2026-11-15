@@ -6,6 +6,18 @@
 
 ![TrojanClaw cover image](https://github.com/aditya1165/TrojanClaw/blob/main/cover/trojanclaw-cover.png?raw=true)
 
+## Current status (November 2026)
+
+This README's feature list describes the original hackathon build. The backend has since been refactored into a single-user API (`backend/app/api`, `services`, `repositories`), and the current behavior differs:
+
+- `POST /chat` is retrieval-augmented chat over the `documents` table with Claude Haiku (`claude-haiku-4-5-20251001`). It does not call any tools yet.
+- Library booking, dining and Google-search tools exist in `backend/app/tools/`, but they are not wired into the current `/chat`. The booking tool never completed a reservation; it only navigated LibCal.
+- Dining hours and deadlines are hard-coded seed data loaded by `push_dining.py` and `push_deadlines.py`. They are not live feeds.
+- Authentication in the frontend is a placeholder: a `localStorage` flag with no real USC sign-in.
+- Answers do not include citations yet.
+
+The plan to integrate Piazza and Brightspace is in `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md`; read its §15 addendum first.
+
 ## Inspiration
 
 USC students juggle a fragmented ecosystem of portals, PDFs, and office websites just to answer questions that should take seconds. Want to book a study room? That's one site. Check what's in the dining hall tonight? Another. Figure out what's due this week across your courses? Open Blackboard, Piazza, and your syllabus and hope for the best. For first-generation students, transfer students, and international students navigating USC for the first time, this friction is especially costly.

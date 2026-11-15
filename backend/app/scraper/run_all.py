@@ -9,8 +9,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from app.scraper.usc_pages import USC_PAGES
 from app.scraper.chunker import fetch_html, clean_html, chunk_text
 from app.scraper.piazza_ingest import sync_piazza_course_documents
-from app.scraper.db_schema import ensure_documents_schema
-import psycopg2
+from app.database import connect_database
+from app.scraper.db_schema import validate_documents_schema
 
 load_dotenv()
 
@@ -28,16 +28,11 @@ def run_scraper_pipeline():
     if not os.getenv("OPENAI_API_KEY"):
         raise ValueError("OPENAI_API_KEY is not set in environment or .env file.")
     
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    if not supabase_url.startswith("postgres"):
-        raise ValueError("SUPABASE_URL must be a postgres connection string.")
-        
     print("Connecting to Postgres database...")
-    conn = psycopg2.connect(supabase_url)
+    conn = connect_database()
     cur = conn.cursor()
 
-    ensure_documents_schema(cur)
-    conn.commit()
+    validate_documents_schema(cur)
 
     
     total_inserted = 0

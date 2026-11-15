@@ -1,12 +1,6 @@
-import os
-import re
-import psycopg2
-from pathlib import Path
-from dotenv import load_dotenv
 import re
 
-ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=ENV_PATH)
+from app.database import connect_database
 
 STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "into", "about",
@@ -71,7 +65,7 @@ def _search_candidates(cur, vec_str: str, inferred_types: list[str], limit: int)
     base_sql = (
         """
         SELECT chunk_text, source_url, page_title, data_type, campus,
-               (embedding <=> %s::vector) AS distance
+               (embedding <=> %s::extensions.vector) AS distance
         FROM documents
         """
     )
@@ -106,7 +100,7 @@ def _search_piazza_candidates(cur, vec_str: str, course_id: str | None, limit: i
         cur.execute(
             """
             SELECT chunk_text, source_url, page_title, data_type, campus,
-                   (embedding <=> %s::vector) AS distance
+                   (embedding <=> %s::extensions.vector) AS distance
             FROM documents
             WHERE data_type = 'piazza_course' AND campus = %s
             ORDER BY distance
@@ -118,7 +112,7 @@ def _search_piazza_candidates(cur, vec_str: str, course_id: str | None, limit: i
         cur.execute(
             """
             SELECT chunk_text, source_url, page_title, data_type, campus,
-                   (embedding <=> %s::vector) AS distance
+                   (embedding <=> %s::extensions.vector) AS distance
             FROM documents
             WHERE data_type = 'piazza_course'
             ORDER BY distance
@@ -188,12 +182,8 @@ def retrieve_context(
 ) -> list[dict]:
     """
     Searches the docs table for the closest matching chunks using pgvector.
-    Uses the SUPABASE_URL connection string locally configured.
+    Uses the dedicated DATABASE_URL PostgreSQL connection string.
     """
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    if not supabase_url.startswith("postgres"):
-        raise ValueError("SUPABASE_URL must be a postgres connection string.")
-        
     vec_str = "[" + ",".join(map(str, query_embedding)) + "]"
     inferred_types = _infer_data_types(query_text)
     terms = _keyword_terms(query_text)
@@ -201,7 +191,7 @@ def retrieve_context(
     course_id = str(context.get("course_id") or "").strip() or None
     course_query = _is_course_query(query_text)
     
-    conn = psycopg2.connect(supabase_url)
+    conn = connect_database()
     cur = conn.cursor()
     
     try:

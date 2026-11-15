@@ -1,12 +1,13 @@
 import os
 import openai
-import psycopg2
 from dotenv import load_dotenv
 
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 load_dotenv()
+
+from app.database import connect_database
 
 MANUAL_DINING = [
     {
@@ -112,12 +113,8 @@ def push_manual_dining_to_db():
     if not os.getenv("OPENAI_API_KEY"):
         raise ValueError("OPENAI_API_KEY is not set.")
     
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    if not supabase_url.startswith("postgres"):
-        raise ValueError("SUPABASE_URL must be a postgres connection string.")
-        
     print("Connecting to Postgres database...")
-    conn = psycopg2.connect(supabase_url)
+    conn = connect_database()
     cur = conn.cursor()
 
     total_inserted = 0
@@ -144,6 +141,13 @@ def push_manual_dining_to_db():
                 """
                 INSERT INTO documents (source_url, page_title, data_type, campus, chunk_text, embedding)
                 VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source_url, chunk_index) DO UPDATE SET
+                    page_title = EXCLUDED.page_title,
+                    data_type = EXCLUDED.data_type,
+                    campus = EXCLUDED.campus,
+                    chunk_text = EXCLUDED.chunk_text,
+                    embedding = EXCLUDED.embedding,
+                    last_scraped = NOW()
                 """,
                 (
                     f"manual-dining-v3-{idx}", 

@@ -24,6 +24,9 @@ backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.ruff_cache/
 
+# Private course data (Piazza exports, downloads)
+backend/data/
+
 # Node / Frontend
 node_modules/
 frontend/node_modules/
@@ -36,4 +39,7 @@ frontend/.eslintcache
 build/
 dist/
 *.egg-info/
-.docx
+*.docx
+
+# Supabase CLI local link and runtime metadata
+supabase/.temp/
