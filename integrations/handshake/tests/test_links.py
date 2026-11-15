@@ -17,6 +17,7 @@ def test_search_results_link_each_job_and_employer_through_mcp(monkeypatch):
 
     monkeypatch.setattr("handshake_mcp.tools.jobs.gql", fake_gql)
     monkeypatch.setattr(handshake_client, "BASE_URL", "https://usc.joinhandshake.com")
+    monkeypatch.setattr("trojanclaw_handshake.configure_handshake_api", lambda: None)
 
     async def check():
         async with Client(create_server()) as client:

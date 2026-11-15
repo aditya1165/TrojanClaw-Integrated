@@ -4,6 +4,7 @@ import asyncio
 from contextlib import redirect_stdout
 import json
 import sys
+import tempfile
 
 from fastmcp import Client
 
@@ -20,7 +21,16 @@ async def execute(request):
     if action == "connect":
         await login()
         action = "verify"
-    server, account = create_server(saved_cookies())
+    # Hosted calls must use the supplied encrypted-account payload, never local cookies.
+    with tempfile.TemporaryDirectory(prefix="trojanclaw-piazza-") as temporary:
+        if "session" in request:
+            server, account = create_server(request["session"], temporary)
+        else:
+            server, account = create_server(saved_cookies())
+        return await execute_server(server, account, action, request)
+
+
+async def execute_server(server, account, action, request):
     try:
         async with Client(server, timeout=65) as client:
             if action == "tools":

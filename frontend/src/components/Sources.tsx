@@ -6,10 +6,12 @@ import { CloseIcon } from "./ui";
 import { toast } from "../lib/toast";
 
 const LABEL: Record<State, string> = {
+  revoking: "Disconnecting…",
   connected: "Connected", saved: "Session saved", connecting: "Signing in…", needs_login: "Sign-in needed",
   not_configured: "Not connected", configured: "Not connected", unavailable: "Coming soon",
 };
 const DOT: Record<State, string> = {
+  revoking: "bg-gold",
   connected: "bg-ok", saved: "bg-gold", connecting: "bg-gold", needs_login: "bg-error",
   not_configured: "bg-muted", configured: "bg-muted", unavailable: "bg-muted",
 };
@@ -68,10 +70,10 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
   }, [open]);
 
   const manage = () => { setOpen(false); onManage(); };
-  // Connect straight from the menu: the sign-in window opens on this computer.
+  // Connect or resume the private sign-in view from the existing menu.
   const connectNow = (provider: ConnectorProvider) => {
     void sources.connect(provider, "connect");
-    toast(`Opening the ${INFO[provider].name} sign-in window on this computer…`);
+    toast(`Opening ${INFO[provider].name} sign-in…`);
   };
   const toggle = (provider: ConnectorProvider, on: boolean) =>
     onChange(on ? [...selected.filter((item) => item !== provider), provider] : selected.filter((item) => item !== provider));
@@ -96,9 +98,9 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
             ) : (
               <div key={provider} className={ROW} title={sources.messageOf(provider) ?? undefined}>
                 <MenuRow id={provider} note={LABEL[state]}>
-                  {state === "connecting" || sources.busy.includes(provider)
+                  {sources.busy.includes(provider)
                     ? <span className="flex-none text-[13px] text-muted">Signing in…</span>
-                    : <button type="button" className={LINK} onClick={() => connectNow(provider)}>{state === "needs_login" ? "Reconnect" : "Connect"}</button>}
+                    : <button type="button" className={LINK} onClick={() => connectNow(provider)}>{state === "connecting" ? "Continue sign-in" : state === "needs_login" ? "Reconnect" : "Connect"}</button>}
                 </MenuRow>
               </div>
             );
@@ -165,13 +167,13 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
         <ul className="flex flex-col divide-y divide-line rounded-xl border border-line">
           {LIVE.map((provider) => {
             const state = sources.stateOf(provider);
-            const waiting = state === "connecting" || sources.busy.includes(provider);
+            const waiting = sources.busy.includes(provider) || state === "revoking";
             return (
               <Row key={provider} id={provider} status={<Status state={state} />} hint={sources.messageOf(provider)}>
                 {usable(state) && !waiting
                   ? <Switch label={`Use ${INFO[provider].name} in chat`} on={selected.includes(provider)} onChange={(on) => toggle(provider, on)} />
                   : <SmallButton disabled={waiting || !sources.connectors} onClick={() => void sources.connect(provider, "connect")}>
-                      {waiting ? "Signing in…" : state === "needs_login" ? "Reconnect" : "Connect"}
+                      {waiting ? LABEL[state] : state === "connecting" ? "Continue sign-in" : state === "needs_login" ? "Reconnect" : "Connect"}
                     </SmallButton>}
               </Row>
             );

@@ -84,9 +84,10 @@ export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export type ConnectorProvider = "piazza" | "brightspace" | "handshake";
+export interface RemoteLogin { login_id: string; live_url: string; state?: string }
 export interface ConnectorStatus {
   provider: ConnectorProvider;
-  state: "not_configured" | "configured" | "saved" | "connecting" | "connected" | "needs_login" | "unavailable";
+  state: "not_configured" | "configured" | "saved" | "connecting" | "connected" | "needs_login" | "unavailable" | "revoking";
   message?: string | null;
 }
 
@@ -96,7 +97,7 @@ export async function getConnectors(): Promise<ConnectorStatus[]> {
   return response.json() as Promise<ConnectorStatus[]>;
 }
 
-export async function connectProvider(provider: ConnectorProvider, action: "connect" | "verify"): Promise<void> {
+export async function connectProvider(provider: ConnectorProvider, action: "connect" | "verify"): Promise<RemoteLogin | undefined> {
   const response = await fetch(`${API_BASE_URL}/integrations/${provider}/${action}`, {
     credentials: "include",
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -105,6 +106,8 @@ export async function connectProvider(provider: ConnectorProvider, action: "conn
     const body = await response.json() as { detail?: string };
     throw new Error(body.detail ?? "Could not connect. Please try again.");
   }
+  const result = await response.json();
+  return result.live_url ? result as RemoteLogin : undefined;
 }
 
 export interface AccountProfile {
@@ -114,17 +117,20 @@ export interface AccountProfile {
 }
 
 export interface UscLoginStatus {
-  status: "waiting" | "failed" | "done";
+  status: "waiting" | "connecting" | "interaction_required" | "failed" | "done";
+  phase?: "brightspace" | "handshake";
   detail?: string | null;
   account?: AccountProfile | null;
 }
 
 export class ApiError extends Error {
   status: number;
+  code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -144,7 +150,7 @@ export async function apiRequest<T>(path: string, body?: object): Promise<T> {
       : Array.isArray(data.detail)
         ? data.detail.map((item: { msg: string }) => item.msg.replace(/^Value error, /, "")).join(" ")
         : "Could not reach your account. Please try again.";
-    throw new ApiError(detail, response.status);
+    throw new ApiError(detail, response.status, typeof data.code === "string" ? data.code : undefined);
   }
   return response.status === 204 ? undefined as T : response.json();
 }

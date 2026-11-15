@@ -1,5 +1,8 @@
 # Piazza connector
 
+Managed Browserbase authentication is the default. The current Google-first flow and Sources UI use encrypted per-account PostgreSQL sessions. See [the connector guide](../CONNECTORS.md) and [remote-browser implementation](remote-browser.md). Desktop commands and cookie-file examples below apply only to explicit `CONNECTOR_MODE=local` development.
+
+
 Piazza is available in Extensions and the Claude chat agent. It uses
 [mcp-piazza](https://github.com/jadenpxrk/mcp-piazza), pinned to 0.1.0, in its own
 Python environment. Piazza requires FastMCP 4; Handshake stays on FastMCP 3.

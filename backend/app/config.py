@@ -1,6 +1,6 @@
 """Typed, centralized environment configuration."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -65,6 +65,12 @@ class Settings:
     google_calendar_encryption_key: str | None = None
     mcp_public_url: str | None = None
     mcp_encryption_key: str | None = None
+    siri_public_url: str | None = None
+    connector_mode: str = "browserbase"
+    connector_encryption_keys: str = field(default="", repr=False)
+    browserbase_api_key: str | None = field(default=None, repr=False)
+    browserbase_project_id: str | None = None
+    public_app_url: str | None = None
 
     @property
     def google_signin_redirect_uri(self) -> str:
@@ -100,12 +106,28 @@ class Settings:
             google_calendar_encryption_key=_optional("GOOGLE_CALENDAR_ENCRYPTION_KEY"),
             mcp_public_url=_optional("MCP_PUBLIC_URL"),
             mcp_encryption_key=_optional("MCP_ENCRYPTION_KEY"),
+            siri_public_url=_optional("SIRI_PUBLIC_URL"),
+            connector_mode=os.getenv("CONNECTOR_MODE", "browserbase").strip().lower(),
+            connector_encryption_keys=os.getenv("CONNECTOR_ENCRYPTION_KEYS", "").strip(),
+            browserbase_api_key=_optional("BROWSERBASE_API_KEY"),
+            browserbase_project_id=_optional("BROWSERBASE_PROJECT_ID"),
+            public_app_url=_optional("PUBLIC_APP_URL"),
             config_dir=Path(os.getenv("TROJANCLAW_CONFIG_DIR", "").strip() or REPOSITORY_DIR),
         )
         settings.validate()
         return settings
 
     def validate(self) -> None:
+        if self.connector_mode not in {"browserbase", "local"}:
+            raise ConfigurationError("CONNECTOR_MODE must be browserbase or local.")
+        if self.app_env in {"production", "staging"}:
+            parsed = urlparse(self.public_app_url or "")
+            if parsed.scheme != "https" or not parsed.hostname or parsed.path or parsed.query or parsed.fragment:
+                raise ConfigurationError("PUBLIC_APP_URL must be the hosted HTTPS origin.")
+            if self.debug or self.connector_mode != "browserbase":
+                raise ConfigurationError("Hosted deployments require Browserbase with APP_DEBUG disabled.")
+            if not self.cors_origins or any(urlparse(origin).scheme != "https" or "*" in origin for origin in self.cors_origins):
+                raise ConfigurationError("Hosted CORS_ORIGINS must contain explicit HTTPS origins.")
         if self.google_calendar_client_id:
             if self.google_calendar_frontend_url not in self.cors_origins:
                 raise ConfigurationError("GOOGLE_CALENDAR_FRONTEND_URL must be a trusted CORS origin.")

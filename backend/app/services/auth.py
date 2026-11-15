@@ -45,6 +45,10 @@ class AuthService:
     def __init__(self, database: Database):
         self.database = database
 
+    def usc_sign_in(self, whoami, old_token=None):
+        profile = self.find_or_create_usc_account(whoami)
+        return profile, self.start_session(profile.id, old_token)
+
     def _new_session(self, cursor, user_id: str, old_token: str | None) -> str:
         if old_token:
             cursor.execute("DELETE FROM public.account_sessions WHERE token_hash = %s", (token_hash(old_token),))
@@ -103,7 +107,7 @@ class AuthService:
                 return self._new_session(cursor, str(user_id), old_token)
 
     def current_user(self, token: str | None) -> AccountProfile:
-        if not token or len(token) > 128 or token.startswith(("tc_pair_", "tc_mcp_", "tc_oauth_")):
+        if not token or len(token) > 128 or token.startswith(("tc_pair_", "tc_mcp_", "tc_oauth_", "tc_siri_")):
             raise HTTPException(401, "Please sign in.")
         with self.database.connection() as connection:
             with connection.cursor() as cursor:

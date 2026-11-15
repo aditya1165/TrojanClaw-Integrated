@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager, contextmanager
 import hashlib
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from cryptography.fernet import Fernet
@@ -18,7 +19,7 @@ from app.api.routes.mcp_connection import router
 from app.models.auth import AccountProfile
 from app.models.chat import ChatResponse
 from app.remote_mcp import create_remote_mcp
-from app.services.mcp_auth import McpOAuth, SCOPE, get_mcp_oauth
+from app.services.mcp_auth import CALENDAR_SCOPE, McpOAuth, SCOPE, get_mcp_oauth
 
 ORIGIN = "https://antelope-barricade-bluish.ngrok-free.dev"
 OWNER = UUID(int=42)
@@ -38,7 +39,10 @@ class MemoryDatabase:
         yield self
 
     def execute(self, sql, params):
-        if sql.startswith("INSERT"):
+        if sql.startswith("SELECT count(*)"):
+            count = sum(key.startswith("mcp:g:") and owner == params[0] for key, owner in self.rows.items())
+            self.result = (count, None)
+        elif sql.startswith("INSERT"):
             assert len(params[0]) == 64, "Match the real account_sessions length constraint"
             assert params[0] not in self.rows
             self.rows[params[0]] = params[1]
@@ -80,11 +84,11 @@ def registration(client):
     return response.json()
 
 
-def authorize(client, info):
+def authorize(client, info, scope=SCOPE):
     verifier = "x" * 64
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     response = client.get("/authorize", params={"client_id":info["client_id"], "redirect_uri":"https://gemini.google.com/callback",
-        "response_type":"code", "scope":SCOPE, "resource":ORIGIN+"/mcp", "state":"keep-this-state",
+        "response_type":"code", "scope":scope, "resource":ORIGIN+"/mcp", "state":"keep-this-state",
         "code_challenge":challenge, "code_challenge_method":"S256"}, follow_redirects=False)
     assert response.status_code in (302,303,307), response.text
     pending = parse_qs(urlparse(response.headers["location"]).query)["mcp_request"][0]
@@ -107,17 +111,19 @@ def test_real_oauth_pkce_mcp_chat_refresh_and_revocation(remote):
     assert response.status_code == 401
     assert "oauth-protected-resource" in response.headers["www-authenticate"]
     assert client.get("/.well-known/oauth-protected-resource/mcp").json()["resource"] == ORIGIN+"/mcp"
+    assert CALENDAR_SCOPE in client.get("/.well-known/oauth-protected-resource/mcp").json()["scopes_supported"]
     info = registration(client)
     code, verifier = authorize(client, info)
     assert token_request(client, info, code, "wrong" * 10).status_code == 400
     result = token_request(client, info, code, verifier)
     assert result.status_code == 200, result.text
     tokens = result.json()
+    assert client.get("/assistant/status").json()["connected"] is True
     assert token_request(client, info, code, verifier).status_code == 400
     headers = {"Authorization":"Bearer "+tokens["access_token"], "Accept":"application/json, text/event-stream", "MCP-Protocol-Version":"2025-03-26"}
     result = client.post("/mcp", headers=headers, json={"jsonrpc":"2.0", "id":2, "method":"tools/list"})
     assert result.status_code == 200, result.text
-    assert [tool["name"] for tool in result.json()["result"]["tools"]] == ["trojanclaw_chat"]
+    assert {tool["name"] for tool in result.json()["result"]["tools"]} == {"trojanclaw_chat", "trojanclaw_draft_calendar_event"}
     result = client.post("/mcp", headers=headers, json={"jsonrpc":"2.0", "id":3, "method":"tools/call",
         "params":{"name":"trojanclaw_chat", "arguments":{"message":"What classes am I taking?"}}})
     assert result.status_code == 200, result.text
@@ -129,6 +135,7 @@ def test_real_oauth_pkce_mcp_chat_refresh_and_revocation(remote):
     assert client.post("/token", data=refresh_data).status_code == 400
     assert asyncio.run(oauth.load_access_token(tokens["access_token"])) is None
     assert client.post("/assistant/disconnect").status_code == 200
+    assert client.get("/assistant/status").json()["connected"] is False
     assert asyncio.run(oauth.load_access_token(refreshed.json()["access_token"])) is None
 
 
@@ -163,3 +170,40 @@ def test_remote_chat_cannot_create_calendar_drafts():
         user_id=OWNER, allow_calendar_drafts=False))
     assert runtime.run.call_args.kwargs["extra_tools"] == []
     calendar.propose.assert_not_called()
+
+
+def test_calendar_draft_requires_new_permission_and_returns_website_review(remote, monkeypatch):
+    from app.models.calendar import CalendarEventDraft, CalendarProposal
+    client, oauth, _ = remote
+    start = (datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=15, minute=0, second=0, microsecond=0)
+    event = CalendarEventDraft(title="Study", start=start, end=start+timedelta(hours=1), timezone="UTC")
+    proposal = CalendarProposal(id=UUID(int=100), version=1, event=event, calendar="primary", status="pending", expires_at=start)
+    calendar = SimpleNamespace(propose=MagicMock(return_value=proposal), approve=MagicMock())
+    conversations = SimpleNamespace(create=MagicMock(return_value={"id":UUID(int=101)}), add_turn=MagicMock(), delete=MagicMock())
+    monkeypatch.setattr("app.remote_mcp.get_calendar_service", lambda: calendar)
+    monkeypatch.setattr("app.remote_mcp.get_conversation_repository", lambda: conversations)
+    info = registration(client)
+    assert CALENDAR_SCOPE in info["scope"].split()
+    arguments = {"event":event.model_dump(mode="json"), "user_request":f"Add Study on {start.date()} from 3pm to 4pm UTC"}
+
+    def call(scope):
+        code, verifier = authorize(client, info, scope)
+        tokens = token_request(client, info, code, verifier).json()
+        headers = {"Authorization":"Bearer "+tokens["access_token"], "Accept":"application/json, text/event-stream", "MCP-Protocol-Version":"2025-03-26"}
+        result = client.post("/mcp", headers=headers, json={"jsonrpc":"2.0", "id":9, "method":"tools/call",
+            "params":{"name":"trojanclaw_draft_calendar_event", "arguments":arguments}})
+        return result.json()["result"], tokens
+
+    result, _ = call(SCOPE)
+    assert result["isError"] is True
+    conversations.create.assert_not_called()
+    result, tokens = call(SCOPE+" "+CALENDAR_SCOPE)
+    assert not result.get("isError")
+    assert ORIGIN+"/chat/"+str(UUID(int=101)) in str(result)
+    calendar.propose.assert_called_once_with(OWNER, event, UUID(int=101))
+    conversations.add_turn.assert_called_once()
+    calendar.approve.assert_not_called()
+    refreshed = client.post("/token", data={"grant_type":"refresh_token", "client_id":info["client_id"],
+        "client_secret":info["client_secret"], "refresh_token":tokens["refresh_token"]})
+    assert refreshed.status_code == 200
+    assert CALENDAR_SCOPE in refreshed.json()["scope"].split()

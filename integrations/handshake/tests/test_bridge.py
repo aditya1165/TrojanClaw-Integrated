@@ -79,3 +79,12 @@ def test_brightspace_json_auth_errors_cannot_mark_session_connected():
     )])
     with pytest.raises(RuntimeError):
         bridge.validate_result(result)
+
+
+def test_handshake_verification_reads_only_identity_not_full_profile(monkeypatch):
+    from trojanclaw_handshake import handshake_client
+    async def gql(query):
+        assert query == '{ currentUser { id } }'
+        return {'currentUser': {'id': 'test-user'}}
+    monkeypatch.setattr(handshake_client, 'gql', gql)
+    assert asyncio.run(bridge.execute_client(None, 'verify', 'handshake', frozenset(), {})) == {'connected': True}

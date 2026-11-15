@@ -35,6 +35,7 @@ frontend/.vite/
 frontend/coverage/
 frontend/.eslintcache
 integrations/google-calendar/.generated/
+docs/*
 
 # ---- Local runtimes and private data ----
 .runtime/

@@ -17,6 +17,7 @@ import { CalendarProposals } from "../components/Calendar";
 import ChatList from "../components/ChatList";
 import CampusWelcome from "../components/CampusWelcome";
 import SettingsDialog from "../components/SettingsDialog";
+import { RemoteSignIn } from "../components/RemoteSignIn";
 import { SourcesDialog, SourcesMenu } from "../components/Sources";
 import type { Theme } from "../theme";
 import {
@@ -295,6 +296,9 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
       </div>
 
       {showSources && <SourcesDialog sources={sources} selected={selectedConnectors} onChange={onConnectorsChange} onClose={() => setShowSources(false)} />}
+      {sources.remote && <RemoteSignIn provider={sources.remote.provider} login={sources.remote.login}
+        busy={sources.busy.includes(sources.remote.provider)} error={sources.error || null}
+        onFinish={() => { void sources.finishRemote(); }} onCancel={() => { void sources.cancelRemote(); }} />}
       {showSettings && <SettingsDialog account={account} theme={theme} onTheme={onTheme}
         onSignOut={() => { setShowSettings(false); onSignOut(); }} signingOut={signingOut} onClose={() => setShowSettings(false)} />}
     </div>

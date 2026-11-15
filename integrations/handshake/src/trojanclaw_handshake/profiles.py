@@ -30,6 +30,7 @@ def handshake_origin(url: str) -> str | None:
 def configure_handshake_api() -> None:
     """Bind the pinned upstream client to the origin that owns the saved session."""
     import handshake_mcp.client as client
+    from handshake_mcp.auth import load_cookies
 
     origin = "https://app.joinhandshake.com"
     path = Path(os.environ["HANDSHAKE_DIR"]).expanduser() / "origin.json"
@@ -42,6 +43,7 @@ def configure_handshake_api() -> None:
     client.API_BASE = f"{origin}/stu"
     client.GQL_URL = f"{origin}/hs/graphql"
     client._csrf_token = None
+    client.load_cookies = load_cookies
 
 
 class LoginError(RuntimeError):
@@ -71,7 +73,9 @@ async def handshake_page_authenticated(page) -> bool:
     if not handshake_origin(page.url):
         return False
     try:
-        return await asyncio.wait_for(page.evaluate("""async () => {
+        result = await asyncio.wait_for(page.evaluate("""async () => {
+            if (document.querySelector('#challenge-running, #challenge-stage, script[src*="/cdn-cgi/challenge-platform/"]')
+                    || /^just a moment/i.test(document.title)) return 'verification_required';
             const token = document.querySelector('meta[name="csrf-token"]')?.content;
             if (!token) return false;
             const response = await fetch('/hs/graphql', {
@@ -79,10 +83,16 @@ async def handshake_page_authenticated(page) -> bool:
                 headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
                 body: JSON.stringify({query: '{ currentUser { id } }'})
             });
+            if (response.headers.get('cf-mitigated') === 'challenge') return 'verification_required';
             if (!response.ok) return false;
             const payload = await response.json();
             return Boolean(payload.data?.currentUser?.id);
         }"""), timeout=10)
+        if result == "verification_required":
+            raise LoginError("verification_required", "Complete Handshake's verification in the remote browser, then retry.")
+        return result is True
+    except LoginError:
+        raise
     except Exception:
         # Login redirects and closed tabs are expected while the user signs in.
         return False

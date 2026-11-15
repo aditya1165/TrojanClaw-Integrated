@@ -1,5 +1,8 @@
 # Handshake integration
 
+Managed Browserbase authentication is the default. The current Google-first flow and Sources UI use encrypted per-account PostgreSQL sessions. See [the connector guide](../CONNECTORS.md) and [remote-browser implementation](remote-browser.md). Desktop commands and cookie-file examples below apply only to explicit `CONNECTOR_MODE=local` development.
+
+
 TrojanClaw uses [shahparam11/handshake-mcp-server](https://github.com/shahparam11/handshake-mcp-server), with a local **read-only wrapper** in `integrations/handshake`. This follows Brightspace's local stdio and read-only approach. The upstream server also supports writes; always launch the TrojanClaw wrapper instead of the upstream server directly.
 
 ## Setup

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { authRequest, type AccountProfile, type UscLoginStatus } from "./lib/api";
+import { ApiError, authRequest, type AccountProfile, type UscLoginStatus } from "./lib/api";
 import { CloseIcon } from "./components/ui";
+import { RemoteSignIn } from "./components/RemoteSignIn";
 
 interface AuthDialogProps {
   onClose: () => void;
@@ -10,9 +11,8 @@ interface AuthDialogProps {
 }
 
 /**
- * Sign in: Continue with Google (in this browser), then one USC login in a small window that
- * the backend opens (NetID + Duo). That window connects Brightspace, Handshake and WebReg
- * and closes by itself; this dialog waits for the backend to say it is done.
+ * Google stays in the ordinary browser. USC uses the shared remote-browser modal,
+ * or an explicit desktop development window, while this dialog polls for completion.
  */
 export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: AuthDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -24,6 +24,9 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
   const attemptRef = useRef<string | null>(null);
   const mounted = useRef(false);
   const resumed = useRef(false);
+  const [remote, setRemote] = useState<{live_url: string; phase: "brightspace" | "handshake"; attempt_id: string} | null>(null);
+  const skipHandshake = useRef(false);
+  const [progress, setProgress] = useState<string | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -61,8 +64,9 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
     }
   };
 
-  // Back from Google: the backend opens the USC login window; poll until it finishes.
+  // Back from Google: open USC sign-in and poll through the connection phases.
   const finishWithUsc = async () => {
+    if (attemptRef.current) return;
     setError("");
     setWaiting(true);
     try {
@@ -70,21 +74,31 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
         left: Math.round(window.screenX + (window.outerWidth - 520) / 2),
         top: Math.round(window.screenY + (window.outerHeight - 720) / 2),
       };
-      const { attempt_id } = await authRequest<{ attempt_id: string }>("google/finish", position);
+      const login = await authRequest<{ attempt_id: string; live_url?: string; phase?: "brightspace" | "handshake" }>("google/finish", position);
+      const { attempt_id } = login;
+      if (login.live_url) setRemote({ attempt_id, live_url: login.live_url, phase: login.phase ?? "brightspace" });
       if (!mounted.current) return;
       attemptRef.current = attempt_id;
       while (attemptRef.current === attempt_id) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         if (attemptRef.current !== attempt_id) return;
-        const result = await authRequest<UscLoginStatus>("google/status", { attempt_id });
+        const result = await authRequest<UscLoginStatus>("google/status", { attempt_id, skip_handshake: skipHandshake.current });
         if (!mounted.current || attemptRef.current !== attempt_id) return;
         if (result.status === "done" && result.account) {
+          setRemote(null);
           onSubmit(result.account, result.detail || undefined);
           return;
         }
+        if (result.phase) setRemote(previous => previous ? { ...previous, phase: result.phase! } : previous);
+        setProgress(result.status === "connecting" ? result.detail ?? "Connecting your USC sources…" : null);
         if (result.status === "failed") throw new Error(result.detail ?? "The USC login did not finish. Please try again.");
       }
     } catch (reason) {
+      setProgress(null);
+      if (reason instanceof ApiError && ["google_signin_expired", "login_expired", "session_invalid"].includes(reason.code ?? "")) {
+        setRemote(null);
+        skipHandshake.current = false;
+      }
       setError(reason instanceof Error ? reason.message : "Couldn't finish signing in. Please try again.");
     } finally {
       attemptRef.current = null;
@@ -100,12 +114,16 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
   }, [resumeGoogle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cancel = () => {
+    setRemote(null);
+    setProgress(null);
+    skipHandshake.current = false;
     attemptRef.current = null;
     setWaiting(false);
     void authRequest<void>("google/cancel", {}).catch(() => {});
   };
 
   return (
+    <>
     <dialog ref={dialogRef} className="auth-dialog" aria-labelledby="auth-title"
       onCancel={(event) => { if (waiting) event.preventDefault(); else onClose(); }}>
       <button type="button" className="auth-close" aria-label="Close" onClick={onClose} disabled={waiting}>
@@ -124,7 +142,7 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-line border-t-accent-fg" aria-hidden="true" />
             <p className="display-title text-[19px]">One more step: your USC login</p>
             <p className="text-xs leading-relaxed text-muted">
-              A small USC window opened (check behind this one). Log in with your NetID and approve Duo; it connects Brightspace, Handshake and WebReg, then closes by itself.
+              {remote ? "Complete USC sign-in and Duo in your private remote browser. Your saved connections stay with your account." : "Complete USC sign-in and Duo in the browser window to connect your sources."}
             </p>
             <button type="button" className="text-xs font-medium text-muted underline hover:text-fg" onClick={cancel}>Cancel</button>
           </div>
@@ -147,6 +165,11 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
         )}
       </div>
     </dialog>
+    {remote && <RemoteSignIn provider={remote.phase} login={{login_id:remote.attempt_id, live_url:remote.live_url}}
+      busy={false} error={error || null} progress={progress} automatic onFinish={() => void finishWithUsc()} onCancel={cancel}
+      onSkip={remote.phase === "handshake" ? () => { skipHandshake.current = true; } : undefined}
+      heading={remote.phase === "brightspace" ? "Sign in with USC" : "Connect Handshake"} />}
+    </>
   );
 }
 

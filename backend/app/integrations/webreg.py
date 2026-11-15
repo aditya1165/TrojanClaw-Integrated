@@ -6,8 +6,9 @@ each term listed, the course bin page is read: every course with its sections, e
 section's columns (as WebReg labels them) and whether it is scheduled and/or registered.
 Nothing is clicked except term links and page loads: no registering or dropping.
 
-The snapshot is saved in the account's own folder (`users/<id>/webreg/coursebin.json`)
-and refreshed on every Sign in with USC.
+Hosted snapshots are stored in the account's encrypted Brightspace session in
+PostgreSQL. Explicit desktop development uses `users/<id>/webreg/coursebin.json`.
+The snapshot is refreshed on each successful USC sign-in when WebReg is available.
 """
 
 from datetime import datetime, timezone
@@ -110,10 +111,40 @@ def save_snapshot(user_id: UUID, terms: list[dict[str, Any]]) -> None:
 
 
 def load_snapshot(user_id: UUID) -> dict[str, Any] | None:
+    from app.config import get_settings
+    if get_settings().connector_mode == "browserbase":
+        from app.integrations.hosted import get_connectors
+        connectors = get_connectors()
+        row = connectors.repository.get(user_id, "brightspace")
+        if not row or row["state"] != "connected":
+            return None
+        return connectors._open(user_id, "brightspace", "session", row["session"]).get("webreg_snapshot")
     path = user_root(user_id) / "webreg" / FILE
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        return None
+
+
+def read_remote_snapshot(connect_url: str) -> dict[str, Any] | None:
+    """Best-effort WebReg read in Browserbase, returned for encrypted account storage."""
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.connect_over_cdp(connect_url, timeout=15000)
+            try:
+                page = browser.contexts[0].new_page()
+                try:
+                    page.set_default_timeout(15000)
+                    terms = read_course_bin(page, wait_seconds=15)
+                    return {"updated_at": datetime.now(timezone.utc).isoformat(), "terms": terms}
+                finally:
+                    page.close()
+            finally:
+                browser.close()
+    except Exception:
+        # Never log the CDP URL, cookies, page contents or student course data.
+        logger.warning("USC setup: optional remote WebReg snapshot was unavailable")
         return None
 
 

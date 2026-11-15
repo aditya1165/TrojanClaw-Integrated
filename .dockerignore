@@ -1,0 +1,17 @@
+.git
+.agents
+.codex
+**/.env
+**/.env.*
+**/.venv
+**/venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.uv-cache
+.runtime
+backend/data
+frontend/dist
+**/profile
+**/cookies.json
+**/origin.json

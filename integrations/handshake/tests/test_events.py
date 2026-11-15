@@ -39,22 +39,24 @@ def unpack(result):
 
 @pytest.fixture
 def catalog(monkeypatch):
-    # Exercise catalog behavior without hosted sessions or real credentials.
-    monkeypatch.setattr('trojanclaw_handshake.configure_handshake_api', lambda: None)
-    monkeypatch.setattr(upstream, 'BASE_URL', 'https://school.joinhandshake.com')
-    monkeypatch.setattr(upstream, 'load_cookies', lambda: {'session': 'account-cookie'})
+    # create_server binds account credentials in process; restore every modified
+    # upstream global so no following desktop test inherits this fake account.
+    for key in ("load_cookies", "BASE_URL", "API_BASE", "GQL_URL", "_csrf_token", "_request", "_fetch_csrf_token"):
+        monkeypatch.setattr(upstream, key, getattr(upstream, key))
     requests, responses = [], []
 
     async def request(method, url, **kwargs):
-        assert upstream.load_cookies() == {'session': 'account-cookie'}
-        requests.append((method, url, deepcopy(kwargs['json'])))
+        assert upstream.load_cookies() == {"session": "account-cookie"}
+        requests.append((method, url, deepcopy(kwargs["json"])))
         response = responses.pop(0)
         if isinstance(response, Exception):
             raise response
         return SimpleNamespace(status_code=200, json=lambda: response)
 
-    monkeypatch.setattr(upstream, '_request', request)
-    return create_server(), requests, responses
+    server = create_server(session=SESSION)
+    monkeypatch.setattr(upstream, "_request", request)
+    return server, requests, responses
+
 
 def test_event_pagination_preserves_opaque_cursor_and_filters(catalog):
     server, requests, responses = catalog

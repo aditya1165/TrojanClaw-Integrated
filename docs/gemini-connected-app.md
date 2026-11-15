@@ -23,8 +23,13 @@ client registration supplies client credentials automatically.
 The linking flow opens TrojanClaw on the ngrok domain. Sign in to the intended
 TrojanClaw account on that domain, review the assistant-access screen, and choose
 **Allow assistant access**. A login on localhost has a different cookie and does
-not automatically sign in the ngrok domain. If an external sign-in flow returns
-to localhost, finish sign-in on the public origin, then restart linking.
+not automatically sign in the ngrok domain. Public sign-in now uses
+`MCP_PUBLIC_URL + /auth/google/callback` and returns to that same public
+origin; local sign-in retains its existing callback. Register the public callback
+in the Google OAuth client's authorized redirect URIs alongside the local ones.
+The pending assistant request is kept in this tab's session storage for up to ten
+minutes across the Google redirect, then cleared on approval, cancellation or
+sign-out. A missing session opens sign-in automatically before account approval.
 
 Then select `@TrojanClaw` (or the connected app's chosen name) in Gemini and ask,
 for example, “What classes am I taking this semester?” Configure and verify the
@@ -67,7 +72,7 @@ changing the public origin requires relinking. The feature is disabled when
 
 Include that HTTPS origin in `CORS_ORIGINS`. Restart the backend after changing
 environment configuration. A hosted reverse proxy must forward `/mcp`,
-`/.well-known/*`, `/authorize`, `/token`, `/register`, `/revoke` and `/api/*`
+`/.well-known/*`, `/authorize`, `/token`, `/register`, `/revoke`, `/auth/google/callback` and `/api/*`
 (strip `/api` for backend API routes, as Vite does). Serve the frontend at `/`.
 Proxy Host must match the advertised public origin; do not trust arbitrary hosts.
 Forward MCP request headers and allow chat requests lasting up to 240 seconds.
@@ -78,7 +83,10 @@ Forward MCP request headers and allow chat requests lasting up to 240 seconds.
   HTTPS redirect validation, dynamic registration and resource-bound tokens.
 - Explicit approval by the signed-in account; the assistant cannot choose a user.
   The requesting client's display name is unverified and shown as such.
-- `trojanclaw:chat` is the only scope. Access tokens last one hour; grants last
+- `trojanclaw:chat` permits questions. Optional `trojanclaw:calendar-draft`
+  permits pending event proposals. Existing chat-only tokens are not upgraded:
+  remove and reconnect the custom app to grant draft access.
+  Access tokens last one hour; grants last
   at most seven days. Refresh tokens rotate, invalidating the previous grant.
 - Protocol metadata/client secrets are encrypted with Fernet. Revocable grants
   and single-use two-minute codes are hashed in the existing `account_sessions`
@@ -86,7 +94,11 @@ Forward MCP request headers and allow chat requests lasting up to 240 seconds.
   requests. No migration or plaintext cookie export is needed.
 - The `trojanclaw_chat(message, timezone)` tool invokes `ChatService` with the
   authenticated subject and that account's saved read-only source connections.
-  Calendar drafts/writes and connector login actions are excluded.
+  Calendar drafts/writes and connector login actions are excluded from this tool.
+- `trojanclaw_draft_calendar_event(event, user_request)` requires the draft scope.
+  It creates an account-owned saved chat and pending proposal, then returns a
+  `/chat/<id>` review URL. The student signs into that account and clicks Approve
+  addition. No MCP tool can approve a proposal or insert a Google event.
 - Access continues independently of the browser session until expiry/revocation.
   Settings → **Disconnect all assistants** revokes that account's
   assistant codes/grants without signing out the browser or Android app.
@@ -94,6 +106,14 @@ Forward MCP request headers and allow chat requests lasting up to 240 seconds.
   also processes the question as it does for website chat.
 
 ## Verification
+
+Settings now displays whether this account has an active assistant grant using
+`GET /assistant/status`. This checks server-side authorization, not whether Gemini
+has the custom app enabled. **Disconnect assistants** revokes access; it is not a
+setup step. If Gemini sends an old credential after revocation, MCP returns 401
+even if Gemini still displays the app as connected. Remove/relink the custom app
+in Gemini and complete the **Allow assistant access** screen to issue a new grant.
+The UI asks for confirmation before revoking all assistant access.
 
 `backend/tests/test_remote_mcp.py` exercises real HTTP MCP tool discovery and chat
 with mocked academic answers, DCR, S256 PKCE, wrong-verifier rejection, code replay,

@@ -19,8 +19,42 @@ from app.agent.runtime import AgentResult, AgentRuntime, _connector_tools, _conn
 from app.config import get_settings
 from app.errors import DependencyUnavailableError
 from app.services.chat import ChatService
+from app.api.routes.integrations import require_local_request
+from starlette.requests import Request
 
 USER = UUID(int=2)
+
+
+def test_public_frontend_is_not_rejected_for_its_forwarded_visitor_ip(monkeypatch):
+    public = "https://tunnel.example"
+    settings = SimpleNamespace(cors_origins=[public, "http://localhost:5173"], mcp_public_url=public)
+    monkeypatch.setattr("app.api.routes.integrations.get_settings", lambda: settings)
+
+    def request(host, origin=None):
+        headers = [(b"host", host.encode())]
+        if origin:
+            headers.append((b"origin", origin.encode()))
+        return Request({"type":"http", "method":"POST", "path":"/auth/google/start", "scheme":"https",
+            "server":(host,443), "client":("203.0.113.25",1234), "headers":headers, "query_string":b""})
+
+    require_local_request(request("tunnel.example", public))
+    for rejected in (request("tunnel.example"), request("unrelated.example", public),
+                     request("tunnel.example", "https://untrusted.example"),
+                     request("tunnel.example", "http://localhost:5173")):
+        with pytest.raises(AppError):
+            require_local_request(rejected)
+
+
+def test_google_start_accepts_the_configured_tunnel_without_opening_usc(monkeypatch):
+    public = "https://tunnel.example"
+    settings = SimpleNamespace(cors_origins=[public], mcp_public_url=public, app_env="test")
+    monkeypatch.setattr("app.api.routes.integrations.get_settings", lambda: settings)
+    monkeypatch.setattr("app.api.routes.auth.get_settings", lambda: settings)
+    monkeypatch.setattr("app.api.routes.google_auth.google_signin.start", lambda _: ("test-attempt", "https://accounts.google.com/test"))
+    response = TestClient(app, base_url=public, client=("203.0.113.25",1234)).post("/auth/google/start", headers={"Origin":public})
+    assert response.status_code == 200
+    assert response.json()["url"].startswith("https://accounts.google.com/")
+    assert "HttpOnly" in response.headers["set-cookie"]
 
 
 @pytest.fixture

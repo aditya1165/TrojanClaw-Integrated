@@ -10,6 +10,7 @@ import Chat from "./screens/Chat";
 import "./App.css";
 import "./workspace.css";
 import { AssistantConsent } from "./components/AssistantConsent";
+import { clearAssistantRequest, readAssistantRequest } from "./lib/assistantRequest";
 
 // Signed out, "home" is the landing page; signed in, it is the chat.
 type Screen = "home" | "how";
@@ -27,7 +28,7 @@ export default function App() {
   // After signing in, the backend connects sources in the background; show its progress.
   const [settingUp, setSettingUp] = useState(false);
   const { theme, toggleTheme, setTheme } = useTheme();
-  const [assistantRequest] = useState(() => new URLSearchParams(window.location.search).get("mcp_request"));
+  const [assistantRequest, setAssistantRequest] = useState(() => readAssistantRequest(window.location.search));
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -44,13 +45,14 @@ export default function App() {
         if (active) setAccount(profile);
       })
       .catch((error) => {
+        if (active && error instanceof ApiError && error.status === 401 && assistantRequest) setShowAuth(true);
         if (active && !(error instanceof ApiError && error.status === 401)) {
           setNotice("Could not restore your session. Please try signing in.");
         }
       })
       .finally(() => { if (active) setCheckingSession(false); });
     return () => { active = false; };
-  }, []);
+  }, [assistantRequest]);
 
   useEffect(() => {
     const expireSession = () => {
@@ -78,6 +80,8 @@ export default function App() {
       setAccount(null);
       setScreen("home");
       setNotice("");
+      clearAssistantRequest();
+      setAssistantRequest(null);
       window.history.replaceState(null, "", "/"); // don't reopen this account's chat after the next sign-in
     } catch {
       setNotice("Could not sign out. Please try again.");
@@ -120,7 +124,7 @@ export default function App() {
           setResumeGoogle(false);
           setNotice(signInNotice || "");
           setScreen("home");
-          setSettingUp(true);
+          setSettingUp(!assistantRequest);
         }} />}
       {settingUp && <SetupScreen includeCalendar onDone={(connected) => {
         setSettingUp(false);

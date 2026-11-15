@@ -8,6 +8,7 @@ export default defineConfig({
     headers: { 'Referrer-Policy': 'no-referrer' },
     allowedHosts: ['antelope-barricade-bluish.ngrok-free.dev'],
     proxy: {
+      '/auth/google/callback': { target: 'http://127.0.0.1:8000', changeOrigin: false },
       '/mcp': { target: 'http://127.0.0.1:8000', changeOrigin: false },
       '/.well-known': { target: 'http://127.0.0.1:8000', changeOrigin: false },
       '/authorize': { target: 'http://127.0.0.1:8000', changeOrigin: false },

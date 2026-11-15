@@ -1,0 +1,17 @@
+{$APP_DOMAIN} {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        Referrer-Policy "no-referrer"
+        X-Content-Type-Options "nosniff"
+    }
+    handle_path /api/* {
+        reverse_proxy api:8000
+    }
+    @backend path /auth/google/callback /calendar/callback /mcp /mcp/* /.well-known/* /authorize /token /register /revoke
+    handle @backend {
+        reverse_proxy api:8000
+    }
+    handle {
+        reverse_proxy web:8080
+    }
+}

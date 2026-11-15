@@ -87,6 +87,15 @@ def test_dashboard_url_alone_does_not_prove_authentication():
     assert asyncio.run(profiles.handshake_page_authenticated(Page())) is False
 
 
+def test_browser_cloudflare_challenge_is_not_reported_as_bad_credentials():
+    class Page:
+        url = 'https://usc.joinhandshake.com/explore'
+        async def evaluate(self, script): return 'verification_required'
+    with pytest.raises(profiles.LoginError) as error:
+        asyncio.run(profiles.handshake_page_authenticated(Page()))
+    assert error.value.code == 'verification_required'
+
+
 def test_unrelated_hostname_is_not_probed():
     class Page:
         url = "https://app.joinhandshake.com.example.org/explore"

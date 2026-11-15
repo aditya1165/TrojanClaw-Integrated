@@ -71,7 +71,7 @@ class LocalConnectors:
     def _run(self, user_id: UUID | str, provider: str, action: str, **payload) -> dict:
         self._require_provider(provider)
         project = self.project.parent / "piazza" if provider == "piazza" else self.project
-        module = "trojanclaw_piazza.bridge" if provider == "piazza" else "trojanclaw_handshake.bridge"
+        module = "trojanclaw_piazza.bridge" if provider == "piazza" else "trojanclaw_handshake.desktop_bridge"
         python = project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if not python.exists():
             raise AppError("Install the local connectors first; see the setup guide.", "connector_not_installed", 503)
@@ -178,5 +178,14 @@ class LocalConnectors:
 
 
 @lru_cache(maxsize=1)
-def get_local_connectors() -> LocalConnectors:
+def get_desktop_connectors() -> LocalConnectors:
     return LocalConnectors()
+
+
+def get_local_connectors():
+    """Compatibility dependency shared by chat, MCP and Siri; hosted by default."""
+    from app.config import get_settings
+    if get_settings().connector_mode == "browserbase":
+        from app.integrations.hosted import get_connectors
+        return get_connectors()
+    return get_desktop_connectors()

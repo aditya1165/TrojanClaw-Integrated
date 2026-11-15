@@ -15,7 +15,7 @@ import psycopg2
 
 from app.api.routes import (
     auth, calendar, chat, conversations, engagesc, google_auth, health,
-    integrations, mcp_connection, mobile, uploads, webreg,
+    integrations, mcp_connection, mobile, siri, uploads, webreg,
 )
 from app.config import ConfigurationError, get_settings
 from app.database import get_database
@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        if request.url.path.startswith(("/auth/", "/assistant/")) or request.url.path == "/mobile/pairing/redeem":
+        if request.url.path.startswith(("/auth/", "/assistant/", "/siri/")) or request.url.path == "/mobile/pairing/redeem":
             # Pydantic's default error input can contain submitted passwords.
             return JSONResponse(status_code=422, content={"detail": [
                 {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
@@ -110,6 +110,7 @@ def create_app() -> FastAPI:
     application.include_router(integrations.router)
     application.include_router(mobile.router)
     application.include_router(mcp_connection.router)
+    application.include_router(siri.router)
     if settings.mcp_public_url:
         from app.remote_mcp import create_remote_mcp
         from app.services.mcp_auth import get_mcp_oauth

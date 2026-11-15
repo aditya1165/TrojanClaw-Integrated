@@ -1,9 +1,10 @@
 # Brightspace integration
 
-The main chat now has a **Connect** button that opens a persistent Chromium
-profile for USC Brightspace and automatically saves its session for the MCP
-server. Use [CONNECTORS.md](CONNECTORS.md) for this workflow. The manual cookie
-steps below document the earlier standalone prototype.
+The main chat's **Connect** button now opens a private managed remote browser for
+the signed-in account. Session cookies are saved encrypted in PostgreSQL and are
+supplied only to that account's MCP process. Use [CONNECTORS.md](../CONNECTORS.md)
+and [DEPLOYMENT.md](../DEPLOYMENT.md). The manual cookie steps below document an
+earlier desktop-only prototype and are not used by the hosted app.
 
 TrojanClaw reads Brightspace through **[brightspace-mcp-server](https://github.com/RohanMuppa/brightspace-mcp-server)** (npm, MIT). It is a read-only MCP server that runs locally over stdio and points at `https://brightspace.usc.edu`.
 

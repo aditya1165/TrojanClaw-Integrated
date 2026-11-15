@@ -1,4 +1,8 @@
 from uuid import UUID
+import os
+
+# Tests must never create billable remote browsers or use real connector state.
+os.environ.setdefault("CONNECTOR_MODE", "local")
 
 import pytest
 
