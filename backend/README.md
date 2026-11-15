@@ -29,7 +29,7 @@ backend/
 └── README.md
 ```
 
-The application supports username/password accounts. Chat runs the agent for the
+Students sign in with Continue with Google, then one USC login (see [CONNECTORS.md](../CONNECTORS.md)). Chat runs the agent for the
 signed-in account: course tools read only that account's rows, while campus search
 and EngageSC events are shared public data. See `TrojanClaw_v2_Architecture_and_Spec.md` (§2.0, §5.9).
 Account authentication is separate from extension linking.
@@ -68,40 +68,14 @@ does not copy another account's extension settings or private academic data.
 Set `RUN_ENGAGESC_DB_TESTS=1` when running pytest to exercise the live feed,
 database persistence, search, and account isolation with temporary accounts.
 
-## Account authentication
+## Accounts and sessions
 
-Apply the existing base migrations, then `supabase/migrations/20261116000000_password_auth.sql`.
-To apply just the auth migration using the configured `backend/.env`, run from the
-repository root:
+There is one way to sign in: **Continue with Google**, followed by one USC login that finds the account by Brightspace user ID and connects the sources (`/auth/google/*`, see [CONNECTORS.md](../CONNECTORS.md)). Username/password sign-in and the separate Sign in with USC button were removed; the old `account_credentials` table is no longer used.
 
-```powershell
-.\backend\.venv\Scripts\python.exe scripts/apply_auth_migration.py --apply
-```
-
-The helper also updates existing Supabase migration history. Without `--apply`,
-it only checks for the prerequisite account tables.
-
-- `POST /auth/register`: `{ "name", "username", "password", "confirm_password" }`
-- `POST /auth/login`: `{ "username", "password" }`
 - `GET /auth/me`: returns `{ "id", "name", "username" }` or 401.
 - `POST /auth/logout`: revokes the session and clears the cookie.
 
-Usernames are case-insensitive, 3–32 ASCII letters/numbers/underscores; passwords
-are 8–128 characters at registration. Passwords use salted scrypt (N=2^17, r=8,
-p=1). Only hashes are stored. Session cookies are HttpOnly, SameSite=Lax, expire
-after seven days, and contain a random token whose SHA-256 hash is stored in
-`account_sessions`. Registration writes the profile, password hash, and session
-in a single transaction. Credential and session tables deny browser database roles.
-
-Use HTTPS and set `APP_ENV=production` in production to require Secure cookies.
-Frontend and API must be hosted on the same site (for example sibling subdomains),
-and `CORS_ORIGINS` must include the exact frontend origin. In local development,
-use `localhost` for both hosts, or `127.0.0.1` for both. Browser requests include cookies.
-No password or session token is stored in localStorage.
-
-Login and registration share a per-process limit of 20 attempts per IP per five
-minutes. For multiple workers or instances, also configure a shared rate limit
-at the ingress; the app does not trust forwarded client-IP headers.
+Session cookies are HttpOnly, SameSite=Lax, expire after seven days, and contain a random token whose SHA-256 hash is stored in `account_sessions`. Use HTTPS and set `APP_ENV=production` in production to require Secure cookies. No session token is stored in localStorage. Starting a Google sign-in is limited to 20 attempts per IP per five minutes, per process.
 
 Run backend tests with `python -m pytest backend/tests -q` from the repository root.
 Set `RUN_AUTH_DB_TESTS=1` to include the real PostgreSQL account lifecycle test;

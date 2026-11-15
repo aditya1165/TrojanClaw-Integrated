@@ -5,12 +5,11 @@ interface LandingProps {
   theme: Theme;
   onToggleTheme: () => void;
   onSignIn: () => void;
-  onCreateAccount: () => void;
   onHowItWorks: () => void;
   checkingSession: boolean;
 }
 
-export default function Landing({ theme, onToggleTheme, onSignIn, onCreateAccount, onHowItWorks, checkingSession }: LandingProps) {
+export default function Landing({ theme, onToggleTheme, onSignIn, onHowItWorks, checkingSession }: LandingProps) {
   return (
     <div className="min-h-screen bg-bg text-fg">
       <nav className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-5">
@@ -33,16 +32,13 @@ export default function Landing({ theme, onToggleTheme, onSignIn, onCreateAccoun
             Every deadline, planned around your week.
           </h1>
           <p className="max-w-xl text-lg leading-relaxed text-muted">
-            One USC login connects Brightspace and Handshake. Ask about deadlines,
-            jobs and campus events in one chat.
+            Sign in with Google and one USC login, and TrojanClaw connects Brightspace,
+            Handshake, WebReg and your calendar. Then just ask.
           </p>
           <div className="mt-2 flex flex-wrap justify-center gap-3">
             <Button onClick={onSignIn} disabled={checkingSession} className="min-h-12 px-5 text-[15px]">
-              {checkingSession ? "Checking your session..." : "Sign in"}
+              {checkingSession ? "Checking your session..." : "Get started"}
               <ArrowRightIcon />
-            </Button>
-            <Button variant="secondary" disabled={checkingSession} onClick={onCreateAccount} className="min-h-12 px-5 text-[15px]">
-              Create account
             </Button>
           </div>
           <p className="inline-flex items-center gap-1.5 text-[13px] text-muted">

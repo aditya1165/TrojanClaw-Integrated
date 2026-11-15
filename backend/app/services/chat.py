@@ -273,7 +273,7 @@ WEBREG_TOOL = {
     "description": "Read the student's USC Web Registration (WebReg) course bin: the courses they have added for each "
                    "term (for example Spring 2027), each section's details as WebReg shows them (section, type, days, "
                    "time, instructor, seats and so on), and whether each section is scheduled and/or registered. "
-                   "Read-only snapshot taken at their last Sign in with USC (see updated_at). Use it for questions about "
+                   "Read-only snapshot taken at their last sign-in (see updated_at). Use it for questions about "
                    "their planned or registered classes for upcoming terms. It cannot register, drop or change anything.",
     "input_schema": {"type": "object", "properties": {"term": {"type": "string", "description": "Optional term name, such as \"Spring 2027\"."}},
                      "additionalProperties": False},

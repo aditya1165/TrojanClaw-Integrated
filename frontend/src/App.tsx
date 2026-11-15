@@ -11,21 +11,19 @@ import "./App.css";
 
 // Signed out, "home" is the landing page; signed in, it is the chat.
 type Screen = "home" | "how";
-type AuthMode = "login" | "register";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("home");
   const [account, setAccount] = useState<AccountProfile | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
+  // Back from Google (?google_signin=ready|error): reopen sign-in to finish the USC step.
   const [resumeGoogle, setResumeGoogle] = useState(() => ["ready", "error"].includes(new URLSearchParams(window.location.search).get("google_signin") || ""));
   const [showAuth, setShowAuth] = useState(resumeGoogle);
-  const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [notice, setNotice] = useState("");
   const [selectedConnectors, setSelectedConnectors] = useState<ConnectorProvider[]>([]);
-  // After Sign in with USC the backend connects sources in the background; show its progress.
+  // After signing in, the backend connects sources in the background; show its progress.
   const [settingUp, setSettingUp] = useState(false);
-  const [googleSetup, setGoogleSetup] = useState(false);
   const { theme, toggleTheme, setTheme } = useTheme();
 
   useEffect(() => {
@@ -56,7 +54,6 @@ export default function App() {
       setSelectedConnectors([]);
       setAccount(null);
       setScreen("home");
-      setAuthMode("login");
       setShowAuth(true);
       setNotice("Your session has expired. Please sign in again.");
     };
@@ -64,9 +61,8 @@ export default function App() {
     return () => window.removeEventListener("auth-expired", expireSession);
   }, []);
 
-  const openAuth = (mode: AuthMode = "login") => {
+  const openAuth = () => {
     if (checkingSession || signingOut) return;
-    setAuthMode(mode);
     setShowAuth(true);
   };
 
@@ -104,21 +100,20 @@ export default function App() {
           onSignOut={signOut} signingOut={signingOut} />
       ) : (
         <Landing theme={theme} onToggleTheme={toggleTheme} checkingSession={checkingSession}
-          onSignIn={() => openAuth()} onCreateAccount={() => openAuth("register")}
+          onSignIn={openAuth}
           onHowItWorks={() => setScreen("how")} />
       )}
-      {showAuth && <AuthDialog key={authMode} initialMode={authMode} resumeGoogle={resumeGoogle} onClose={() => { setShowAuth(false); setResumeGoogle(false); }}
-        onSubmit={(profile, viaUsc, signInNotice) => {
-          setGoogleSetup(resumeGoogle);
+      {showAuth && <AuthDialog resumeGoogle={resumeGoogle} onClose={() => { setShowAuth(false); setResumeGoogle(false); }}
+        onSubmit={(profile, signInNotice) => {
           setSelectedConnectors([]);
           setAccount(profile);
           setShowAuth(false);
           setResumeGoogle(false);
           setNotice(signInNotice || "");
           setScreen("home");
-          setSettingUp(viaUsc);
+          setSettingUp(true);
         }} />}
-      {settingUp && <SetupScreen includeCalendar={googleSetup} onDone={(connected) => {
+      {settingUp && <SetupScreen includeCalendar onDone={(connected) => {
         setSettingUp(false);
         setSelectedConnectors(connected);
       }} />}

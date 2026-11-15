@@ -19,10 +19,10 @@ const SOURCES = [
 ];
 
 const QUESTIONS = [
-  { q: "Do I sign in every time?", a: "No. TrojanClaw keeps your session. When USC ends it, sign in with USC again and your sources reconnect." },
+  { q: "Do I sign in every time?", a: "No. TrojanClaw keeps your session. When USC ends it, sign in again and your sources reconnect." },
   { q: "Who else can use my connections?", a: "Nobody. Each TrojanClaw account keeps its own sessions, separate from everyone else's." },
   { q: "Can it submit work or apply to jobs?", a: "No. Sources are read-only. The only thing it can add is a calendar event you approve." },
-  { q: "Can I use it without a USC login?", a: "Yes. Create a TrojanClaw username and password, then connect sources from Sources in the app." },
+  { q: "Why Google and then USC?", a: "Google is your TrojanClaw sign-in and connects your calendar. The USC login connects Brightspace, Handshake and WebReg in the same step." },
 ];
 
 function Step({ number, title, children, visual }: { number: number; title: string; children: ReactNode; visual: ReactNode }) {
@@ -67,13 +67,13 @@ export default function HowItWorks({ theme, onToggleTheme, signedIn, onBack, onS
         </header>
 
         <section className="mx-auto flex max-w-5xl flex-col gap-5 px-6 pb-20">
-          <Step number={1} title="Sign in with USC" visual={<>
-            <strong className="text-sm">USC sign-in</strong>
-            <Pill><span className="text-muted">NetID and password</span></Pill>
+          <Step number={1} title="Continue with Google, then USC" visual={<>
+            <Pill><span className="font-medium">Continue with Google</span></Pill>
+            <Pill><span className="text-muted">USC NetID and password</span></Pill>
             <div className="rounded-xl bg-accent px-3.5 py-3 text-center text-sm font-semibold text-on-accent">Log in, then approve Duo</div>
           </>}>
-            A USC sign-in window opens. Enter your NetID password and approve Duo, the same as on any USC site.
-            Your password goes to USC's own page. TrojanClaw does not store it.
+            Sign in with your @usc.edu Google account. Then a USC window opens once: enter your NetID password and
+            approve Duo. Your password goes to USC's own page; TrojanClaw does not store it.
           </Step>
 
           <Step number={2} title="We set things up for you" visual={<>
@@ -147,7 +147,7 @@ export default function HowItWorks({ theme, onToggleTheme, signedIn, onBack, onS
             <p className="opacity-85">{signedIn ? "Your sources are a click away in the chat box." : "It takes about a minute, including Duo."}</p>
             <button type="button" onClick={onStart}
               className="min-h-12 rounded-xl bg-gold px-6 text-[15px] font-semibold text-[#1c1917] hover:brightness-105">
-              {signedIn ? "Open chat" : "Sign in with USC"}
+              {signedIn ? "Open chat" : "Get started"}
             </button>
           </div>
         </section>

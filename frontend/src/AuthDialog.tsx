@@ -1,28 +1,29 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { authRequest, type AccountProfile, type UscLoginStatus } from "./lib/api";
 import { CloseIcon } from "./components/ui";
 
 interface AuthDialogProps {
   onClose: () => void;
-  onSubmit: (profile: AccountProfile, viaUsc: boolean, notice?: string) => void;
-  initialMode?: "login" | "register";
+  onSubmit: (profile: AccountProfile, notice?: string) => void;
+  /** Back from Google: finish with the USC login, which connects Brightspace, Handshake and WebReg. */
   resumeGoogle?: boolean;
 }
 
-export default function AuthDialog({ onClose, onSubmit, initialMode = "login", resumeGoogle = false }: AuthDialogProps) {
+/**
+ * Sign in: Continue with Google (in this browser), then one USC login in a small window that
+ * the backend opens (NetID + Duo). That window connects Brightspace, Handshake and WebReg
+ * and closes by itself; this dialog waits for the backend to say it is done.
+ */
+export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: AuthDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(initialMode === "register");
-  const [passwordError, setPasswordError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [uscWaiting, setUscWaiting] = useState(false);
-  const [uscError, setUscError] = useState("");
-  const uscAttemptRef = useRef<string | null>(null);
-  const [googleConfigured, setGoogleConfigured] = useState(false);
-  const [googleStarting, setGoogleStarting] = useState(false);
-  const [googleResuming, setGoogleResuming] = useState(resumeGoogle);
-  const resumeStarted = useRef(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [waiting, setWaiting] = useState(resumeGoogle); // the USC step after Google
+  const [error, setError] = useState("");
+  const attemptRef = useRef<string | null>(null);
   const mounted = useRef(false);
+  const resumed = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -30,175 +31,132 @@ export default function AuthDialog({ onClose, onSubmit, initialMode = "login", r
     dialog?.showModal();
     return () => {
       mounted.current = false;
-      uscAttemptRef.current = null; // stop polling if the dialog closes
+      attemptRef.current = null; // stop polling if the dialog closes
       dialog?.close();
     };
   }, []);
 
-  // Put the typing cursor in the first field, so you can type without clicking.
-  // (showModal() would otherwise focus the dialog's first button.)
-  useEffect(() => {
-    if (resumeGoogle) return;
-    dialogRef.current?.querySelector<HTMLInputElement>(isCreatingAccount ? "#auth-name" : "#auth-username")?.focus();
-  }, [isCreatingAccount, resumeGoogle]);
-
   useEffect(() => {
     let active = true;
     authRequest<{ configured: boolean }>("google/config")
-      .then((result) => { if (active) setGoogleConfigured(result.configured); })
-      .catch(() => { if (active) setGoogleConfigured(false); });
+      .then((result) => { if (active) setConfigured(result.configured); })
+      .catch(() => { if (active) setConfigured(false); });
     return () => { active = false; };
   }, []);
 
-  const signInWithGoogle = async () => {
-    setGoogleStarting(true);
-    setUscError("");
+  // Ready for Enter as soon as the button can be used.
+  useEffect(() => {
+    if (configured) buttonRef.current?.focus();
+  }, [configured]);
+
+  const continueWithGoogle = async () => {
+    setStarting(true);
+    setError("");
     try {
       const { url } = await authRequest<{ url: string }>("google/start", {});
-      window.location.assign(url);
+      window.location.assign(url); // Google signs in here, in the student's own browser
     } catch (reason) {
-      setUscError(reason instanceof Error ? reason.message : "Could not start Google sign-in.");
-      setGoogleStarting(false);
+      setError(reason instanceof Error ? reason.message : "Couldn't open Google sign-in.");
+      setStarting(false);
     }
   };
 
-  // Sign in with USC: the backend opens a Chrome window for the USC login; poll until it finishes.
-  const signInWithUsc = async (fromGoogle = false) => {
-    setSubmitError("");
-    setUscError("");
-    setUscWaiting(true);
+  // Back from Google: the backend opens the USC login window; poll until it finishes.
+  const finishWithUsc = async () => {
+    setError("");
+    setWaiting(true);
     try {
-      // Center the 520×720 sign-in popup over this browser window.
-      const position = {
+      const position = {  // centre the 520×720 window over this one
         left: Math.round(window.screenX + (window.outerWidth - 520) / 2),
         top: Math.round(window.screenY + (window.outerHeight - 720) / 2),
       };
-      const { attempt_id } = await authRequest<{ attempt_id: string }>(fromGoogle ? "google/finish" : "usc/start", position);
+      const { attempt_id } = await authRequest<{ attempt_id: string }>("google/finish", position);
       if (!mounted.current) return;
-      uscAttemptRef.current = attempt_id;
-      while (uscAttemptRef.current === attempt_id) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        if (uscAttemptRef.current !== attempt_id) return;
-        const result = await authRequest<UscLoginStatus>(fromGoogle ? "google/status" : "usc/status", { attempt_id });
-        if (!mounted.current || uscAttemptRef.current !== attempt_id) return;
+      attemptRef.current = attempt_id;
+      while (attemptRef.current === attempt_id) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (attemptRef.current !== attempt_id) return;
+        const result = await authRequest<UscLoginStatus>("google/status", { attempt_id });
+        if (!mounted.current || attemptRef.current !== attempt_id) return;
         if (result.status === "done" && result.account) {
-          onSubmit(result.account, true, result.detail || undefined);
+          onSubmit(result.account, result.detail || undefined);
           return;
         }
-        if (result.status === "failed") throw new Error(result.detail ?? "The USC login did not finish.");
+        if (result.status === "failed") throw new Error(result.detail ?? "The USC login did not finish. Please try again.");
       }
-    } catch (error) {
-      setUscError(error instanceof Error ? error.message : "Could not sign in with USC. Please try again.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Couldn't finish signing in. Please try again.");
     } finally {
-      uscAttemptRef.current = null;
-      setUscWaiting(false);
-      setGoogleResuming(false);
+      attemptRef.current = null;
+      if (mounted.current) setWaiting(false);
     }
   };
 
   useEffect(() => {
-    if (resumeGoogle && !resumeStarted.current) {
-      resumeStarted.current = true;
-      void signInWithUsc(true);
+    if (resumeGoogle && !resumed.current) {
+      resumed.current = true;
+      void finishWithUsc();
     }
   }, [resumeGoogle]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cancelUsc = () => {
-    uscAttemptRef.current = null;
-    setUscWaiting(false);
-    if (googleResuming) void authRequest<void>("google/cancel", {}).catch(() => {});
-    setGoogleResuming(false);
-  };
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isSubmitting || uscWaiting || googleStarting) return;
-    const data = new FormData(event.currentTarget);
-    if (isCreatingAccount && data.get("password") !== data.get("confirmPassword")) {
-      setPasswordError("Passwords do not match.");
-      return;
-    }
-    setSubmitError("");
-    setIsSubmitting(true);
-    try {
-      const credentials = {
-        username: String(data.get("username") || "").trim(),
-        password: String(data.get("password") || ""),
-      };
-      const profile = await authRequest<AccountProfile>(isCreatingAccount ? "register" : "login", {
-        ...credentials,
-        ...(isCreatingAccount ? {
-          name: String(data.get("name") || "").trim(),
-          confirm_password: String(data.get("confirmPassword") || ""),
-        } : {}),
-      });
-      onSubmit(profile, false);
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Could not sign in. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
+  const cancel = () => {
+    attemptRef.current = null;
+    setWaiting(false);
+    void authRequest<void>("google/cancel", {}).catch(() => {});
   };
 
   return (
-    <dialog ref={dialogRef} className="auth-dialog" aria-labelledby="auth-title" onCancel={(event) => { if (isSubmitting) event.preventDefault(); else onClose(); }}>
-      <button type="button" disabled={isSubmitting} className="auth-close" aria-label="Close sign-in" onClick={onClose}>
+    <dialog ref={dialogRef} className="auth-dialog" aria-labelledby="auth-title"
+      onCancel={(event) => { if (waiting) event.preventDefault(); else onClose(); }}>
+      <button type="button" className="auth-close" aria-label="Close" onClick={onClose} disabled={waiting}>
         <CloseIcon />
       </button>
-      <div className="auth-brand">
-        <img src="/logo.png" alt="" />
-        <span>TrojanClaw</span>
+
+      <div className="flex flex-col items-center gap-6 text-center">
+        <img src="/logo.png" alt="" className="h-14 w-14 object-contain" />
+        <div className="flex flex-col gap-2">
+          <h2 id="auth-title" className="text-2xl font-semibold tracking-[-0.03em]">Welcome to TrojanClaw</h2>
+          <p className="text-sm text-muted">Sign in with your USC Google account.</p>
+        </div>
+
+        {waiting ? (
+          <div role="status" className="flex w-full flex-col items-center gap-3 rounded-2xl bg-subtle px-5 py-5">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-line border-t-accent-fg" aria-hidden="true" />
+            <p className="text-sm font-medium">One more step: your USC login</p>
+            <p className="text-xs leading-relaxed text-muted">
+              A small USC window opened (check behind this one). Log in with your NetID and approve Duo; it connects Brightspace, Handshake and WebReg, then closes by itself.
+            </p>
+            <button type="button" className="text-xs font-medium text-muted underline hover:text-fg" onClick={cancel}>Cancel</button>
+          </div>
+        ) : (
+          <button ref={buttonRef} type="button" onClick={() => void continueWithGoogle()} disabled={!configured || starting}
+            className="flex min-h-12 w-full items-center justify-center gap-3 rounded-full border border-line bg-surface px-5 text-[15px] font-medium text-fg shadow-sm transition hover:bg-subtle hover:shadow disabled:cursor-not-allowed disabled:opacity-60">
+            {starting
+              ? <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-line border-t-fg" aria-hidden="true" />
+              : <GoogleLogo />}
+            {starting ? "Opening Google…" : "Continue with Google"}
+          </button>
+        )}
+
+        {error && <p role="alert" className="text-sm text-error">{error}</p>}
+        {configured === false && !error && (
+          <p className="text-xs text-muted">Google sign-in isn't set up on this server yet.</p>
+        )}
+        {!waiting && configured !== false && (
+          <p className="text-xs leading-relaxed text-muted">Use your @usc.edu account. Next, USC asks you to log in once.</p>
+        )}
       </div>
-      <h2 id="auth-title">{isCreatingAccount ? "Create your account" : "Welcome back"}</h2>
-      <p className="auth-description">
-        {isCreatingAccount ? "A little less planning. A little more doing." : "Sign in to your academic copilot."}
-      </p>
-      <div className="auth-usc">
-        <button type="button" className="auth-submit" onClick={signInWithGoogle} disabled={!googleConfigured || isSubmitting || uscWaiting || googleStarting}>
-          {googleStarting ? "Opening Google sign-in…" : "Continue with USC Google"}
-        </button>
-        <p className="auth-description">{googleConfigured ? "Connect Google Calendar, then finish connecting Brightspace. USC may ask you to sign in and approve Duo." : "Google sign-in is not available yet. You can sign in with USC below."}</p>
-        <button type="button" className="auth-submit" onClick={() => signInWithUsc()} disabled={isSubmitting || uscWaiting || googleStarting}>
-          {uscWaiting ? "Waiting for your USC login..." : "Sign in with USC"}
-        </button>
-        {uscWaiting && (
-          <p className="auth-description" role="status">
-            {googleResuming ? "Google sign-in finished. Complete USC sign-in in the new window to connect Brightspace using the same USC account." : "Log in and approve Duo in the USC sign-in window."}{" "}
-            <button type="button" className="auth-link" onClick={cancelUsc}>Cancel</button>
-          </p>
-        )}
-        {uscError && <p className="auth-error" role="alert">{uscError}</p>}
-        <p className="auth-divider"><span>or use a TrojanClaw username</span></p>
-      </div>
-      <form key={String(isCreatingAccount)} className="auth-form" onSubmit={handleSubmit}>
-        {isCreatingAccount && (
-          <label htmlFor="auth-name">Name
-            <input id="auth-name" name="name" autoComplete="name" placeholder="Your name" pattern=".*\S.*" maxLength={100} required />
-          </label>
-        )}
-        <label htmlFor="auth-username">Username
-          <input id="auth-username" name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="Your username" pattern="[a-zA-Z0-9_]{3,32}" title="3–32 letters, numbers, or underscores" minLength={3} maxLength={32} required />
-        </label>
-        <label htmlFor="auth-password">Password
-          <input id="auth-password" name="password" type="password" autoComplete={isCreatingAccount ? "new-password" : "current-password"} placeholder={isCreatingAccount ? "At least 8 characters" : "Your password"} minLength={isCreatingAccount ? 8 : 1} maxLength={128} required onChange={() => setPasswordError("")} />
-        </label>
-        {isCreatingAccount && (
-          <label htmlFor="auth-confirm-password">Confirm password
-            <input id="auth-confirm-password" name="confirmPassword" type="password" autoComplete="new-password" placeholder="Re-enter your password" required aria-invalid={Boolean(passwordError)} aria-describedby={passwordError ? "password-error" : undefined} onChange={() => setPasswordError("")} />
-          </label>
-        )}
-        {passwordError && <p id="password-error" className="auth-error" role="alert">{passwordError}</p>}
-        {submitError && <p className="auth-error" role="alert">{submitError}</p>}
-        <button className="auth-submit" type="submit" disabled={isSubmitting || uscWaiting}>{isSubmitting ? "Please wait..." : isCreatingAccount ? "Create account" : "Sign in"}</button>
-      </form>
-      <p className="auth-switch">
-        {isCreatingAccount ? "Already have an account?" : "New to TrojanClaw?"}{" "}
-        <button type="button" disabled={isSubmitting} onClick={() => {
-          setIsCreatingAccount(!isCreatingAccount);
-          setPasswordError("");
-          setSubmitError("");
-        }}>{isCreatingAccount ? "Sign in" : "Create account"}</button>
-      </p>
     </dialog>
+  );
+}
+
+function GoogleLogo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.5z" />
+      <path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+      <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.5z" />
+    </svg>
   );
 }

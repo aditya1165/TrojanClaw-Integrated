@@ -26,7 +26,7 @@ Then just ask: *what's due, what's next, what fits your week.*
 
 | | |
 | :--- | :--- |
-| 🔐 **One USC login** | Sign in with your NetID and Duo once. TrojanClaw connects Brightspace, Handshake and your WebReg course bin in the background. **Continue with USC Google** adds Google Calendar too. |
+| 🔐 **One sign-in** | **Continue with Google** with your @usc.edu account, then one USC login (NetID + Duo). TrojanClaw connects Google Calendar, Brightspace, Handshake and your WebReg course bin in the background. |
 | 💬 **Chat that checks for you** | Replies stream in word by word, with a live status line ("Checking Brightspace: upcoming due dates") and source links under each answer. |
 | 🗂️ **Saved chats** | Every chat has its own link, an AI-written title, and can be searched, pinned, renamed or deleted. |
 | 🔌 **Sources you control** | Turn Brightspace, Handshake, Piazza and campus events on or off from the chat box. If a session expires, a banner offers **Reconnect**. |
@@ -72,7 +72,7 @@ Connector logins run in a real Chrome window on **your** computer, and each Troj
 | [Python](https://www.python.org/downloads/) | 3.11 | Backend |
 | [uv](https://docs.astral.sh/uv/getting-started/installation/) | latest | Connector helpers (installs Python 3.12 for them) |
 | [Node.js](https://nodejs.org/) | 22.12+ | Frontend and Google Calendar |
-| [Google Chrome](https://www.google.com/chrome/) | latest | Sign in with USC and connector logins |
+| [Google Chrome](https://www.google.com/chrome/) | latest | The USC login popup and connector logins |
 
 ### 1 · Set up the backend
 
@@ -125,7 +125,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173** and click **Sign in with USC**. 🎉
+Open **http://127.0.0.1:5173**, click **Get started**, then **Continue with Google**. 🎉
 
 > [!IMPORTANT]
 > Always use **`127.0.0.1`**, not `localhost`. The browser keeps sign-in cookies per host, and mixing the two breaks sign-in.
@@ -143,7 +143,7 @@ All settings live in `backend/.env` (template: [`backend/.env.example`](backend/
 | `SUPABASE_SECRET_KEY` | Secret key for the private file-upload bucket (backend only) | for 📎 |
 | `ANTHROPIC_API_KEY` | Claude | ✅ |
 | `GEMINI_API_KEY` | Embeddings for course and campus search | ✅ |
-| `GOOGLE_CALENDAR_*` | Google OAuth client, redirect URIs and the token encryption key | for 📅 |
+| `GOOGLE_CALENDAR_*` | Google OAuth client (sign-in and Calendar), redirect URIs and the token encryption key | ✅ |
 | `CORS_ORIGINS` | Allowed frontend address (`http://127.0.0.1:5173`) | ✅ |
 
 The frontend needs only `frontend/.env` with `VITE_API_BASE_URL=/api`. Vite forwards `/api` to the backend.
@@ -158,7 +158,7 @@ TrojanClaw_v2/
 │   ├── app/agent/           Claude agent runtime (streaming, tool activity)
 │   ├── app/mcp_server/      TrojanClaw MCP tools, built per student
 │   ├── app/integrations/    Live connectors, WebReg, Google Calendar gateway
-│   ├── app/services/        Chat, calendar, uploads, Sign in with USC
+│   ├── app/services/        Chat, calendar, uploads, sign-in (Google, then USC)
 │   ├── app/api/routes/      HTTP endpoints
 │   └── tests/               Backend tests
 ├── frontend/                React 19 + Vite + Tailwind (USC cardinal & gold)
@@ -201,7 +201,7 @@ TrojanClaw_v2/
 
 | Guide | What's inside |
 | :--- | :--- |
-| [CONNECTORS.md](CONNECTORS.md) | Sign in with USC, per-account sessions, WebReg, how chat uses connectors |
+| [CONNECTORS.md](CONNECTORS.md) | Signing in, per-account sessions, WebReg, how chat uses connectors |
 | [backend/README.md](backend/README.md) | Backend setup and the chat API (streaming, saved chats, uploads) |
 | [docs/google-calendar.md](docs/google-calendar.md) | Google OAuth setup, drafts and approval |
 | [docs/brightspace.md](docs/brightspace.md) · [docs/handshake.md](docs/handshake.md) · [docs/piazza.md](docs/piazza.md) | What each connector can read |

@@ -108,7 +108,7 @@ prompt or automatic reuse of Google's Shibboleth session.
 Pending sign-ins are held in memory, encrypted after the OAuth exchange, expire
 after ten minutes per stage, and are bound to the initiating browser cookie.
 Run one local backend worker; restarting it requires starting sign-in again.
-The existing **Sign in with USC** and username/password options remain available.
+Continue with Google is the only way to sign in; the USC login step always follows it.
 
 ## Try it
 

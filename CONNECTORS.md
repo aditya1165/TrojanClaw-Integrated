@@ -6,11 +6,11 @@ Calendar chat can read events from the connected primary Google Calendar using t
 
 The main chat supports Brightspace, Handshake and Piazza with separate, account-scoped persistent Chromium profiles. Piazza has its own sign-in; see [Piazza setup](docs/piazza.md).
 
-Once a connector has a saved session, chat uses it automatically: the student signs in once (Sign in with USC or **Connect**) and then just asks. See [How chat uses connectors](#how-chat-uses-connectors).
+Once a connector has a saved session, chat uses it automatically: the student signs in once (Continue with Google, or **Connect** in Sources) and then just asks. See [How chat uses connectors](#how-chat-uses-connectors).
 
 ## Local setup
 
-Requirements: Git, uv, Python 3.11 for FastAPI, Python 3.12–3.14 for the connector helper, Node.js 22 or newer for Brightspace and the frontend, and Google Chrome (Sign in with USC opens its popup in the installed Chrome). Run the backend on your own computer, in a single process, bound to `127.0.0.1`. The persistent browser profiles belong to that computer's owner; this prototype is not a hosted multi-user authentication service. Saved sessions are per TrojanClaw account (see [Persistent storage](#persistent-storage) below).
+Requirements: Git, uv, Python 3.11 for FastAPI, Python 3.12–3.14 for the connector helper, Node.js 22 or newer for Brightspace and the frontend, and Google Chrome (the USC login popup opens in the installed Chrome). Run the backend on your own computer, in a single process, bound to `127.0.0.1`. The persistent browser profiles belong to that computer's owner; this prototype is not a hosted multi-user authentication service. Saved sessions are per TrojanClaw account (see [Persistent storage](#persistent-storage) below).
 
 From the repository root:
 
@@ -47,24 +47,17 @@ omit the HttpOnly sign-in cookie, causing 401 responses immediately after login.
 Restart Vite after changing environment settings. Google OAuth additionally
 requires its configured frontend/callback URLs to use matching hostnames.
 
-## Sign in with USC (one login for everything)
+## Signing in: Continue with Google, then one USC login
 
-The sign-in dialog also offers **Continue with USC Google** when Calendar OAuth
-is configured. It completes Google authorization in the normal browser, then
-automatically starts the USC flow below, validates both sign-in identities, and
-connects the primary calendar through Google's official MCP server. The current
-USC helper uses a separate browser session and may require another USC/Duo step.
-Calendar uses the local open-source nspady MCP server with the standard Calendar API.
-Install its dependencies with `npm ci --prefix integrations/google-calendar`.
-Register both callback URIs; see [Google Calendar setup](docs/google-calendar.md).
+**Continue with Google** is the only way to sign in. It needs Google Calendar OAuth configured (see [Google Calendar setup](docs/google-calendar.md)) and the Calendar helper installed (`npm ci --prefix integrations/google-calendar`).
 
-**Sign in with USC** signs the student in to TrojanClaw and connects Brightspace and Handshake with a single USC login (password + Duo).
+1. The student clicks **Get started**, then **Continue with Google**, and signs in with their @usc.edu Google account **in their own browser** (a normal page redirect). Only verified `usc.edu` accounts are accepted.
+2. Back in the app, a small Chrome window opens on Brightspace and is brought to the front. The student logs in to USC (NetID + Duo). Its address bar stays visible so the student can check it is the real USC login page.
+3. The backend asks Brightspace who logged in (`whoami`), checks it matches the Google account, and finds or creates the TrojanClaw account by Brightspace user ID. Brightspace's session is saved and Google Calendar is connected.
+4. The app shows **Setting things up for you…** while the window (now minimized) signs in to Handshake and reads the WebReg course bin, both reusing the USC login from step 2. WebReg is skipped if it doesn't open by itself within 30 seconds.
+5. The window closes by itself and the app opens the chat with the connected sources turned on.
 
-1. Click **Sign in**, then **Sign in with USC**. A small Chrome popup opens over the app on Brightspace. Its address bar stays visible so the student can check it is the real USC login page.
-2. The student logs in to USC. The backend asks Brightspace who logged in (`/d2l/api/lp/<version>/users/whoami`) and finds or creates the TrojanClaw account. USC accounts are matched only by Brightspace user ID, never by username, so a USC login cannot take over a username/password account. Brightspace's own session is saved for its connector.
-3. The app shows **Setting things up for you…** while the backend minimizes the popup and opens Handshake's direct USC sign-in link in the same browser. USC's login session is still alive there, so Handshake signs in without a password. Its session is saved and verified with a read-only MCP call.
-4. If Handshake has not signed in by itself after 20 seconds (for example USC asks for Duo again), the popup comes back to the front so the student can finish. After five minutes the card shows **Sign-in needed** and **Connect** works as below.
-5. The browser closes and the app opens the chat with the connected sources selected.
+Google sign-in deliberately stays in the student's own browser: Google (and USC's hand-off to Google) does not complete inside an automated browser window.
 
 Why it works this way (checked against the live sites on 2026-11-14):
 
@@ -73,7 +66,7 @@ Why it works this way (checked against the live sites on 2026-11-14):
 - USC's login cookies are session cookies, deleted when the browser closes. So every site is connected in the same browser right after the login, and nothing of the USC login itself is stored.
 - Piazza's school SSO does not include USC, so Piazza cannot use the USC login.
 
-Username/password accounts still work, and **Connect** below still works for any source.
+**Connect** in Sources still works for any source, for example after a session expires.
 
 The backend must run on the student's computer, because the popup opens there.
 
@@ -90,10 +83,10 @@ After an app restart, cards with stored session data show **Session saved**, and
 
 ## WebReg (read-only course bin)
 
-Sign in with USC also opens USC Web Registration (`webreg.usc.edu`) in the same window, after Handshake, reusing the USC login (no extra Duo expected; if USC asks, the popup comes back). For every term WebReg lists (for example Spring 2027, Fall 2026, Summer 2026) it reads the **course bin**: each course, each section's columns as WebReg labels them, and whether the section is scheduled and/or registered. Nothing is clicked except term links and page loads, so it never registers or drops.
+The USC login step also opens USC Web Registration (`webreg.usc.edu`) in the same window, after Handshake, reusing the USC login (no extra Duo expected; if USC asks, the popup comes back). For every term WebReg lists (for example Spring 2027, Fall 2026, Summer 2026) it reads the **course bin**: each course, each section's columns as WebReg labels them, and whether the section is scheduled and/or registered. Nothing is clicked except term links and page loads, so it never registers or drops.
 
 - WebReg has no data API and is behind Cloudflare, so it is read in the real Chrome window, not with plain HTTP requests (`backend/app/integrations/webreg.py`).
-- The result is a snapshot in the account's own folder (`users/<id>/webreg/coursebin.json`), refreshed at every Sign in with USC. No WebReg cookies are kept.
+- The result is a snapshot in the account's own folder (`users/<id>/webreg/coursebin.json`), refreshed at every sign-in. No WebReg cookies are kept.
 - Chat gets `list_webreg_courses` when a snapshot exists; the Sources window shows when it was taken (`GET /integrations/webreg`).
 
 ## How chat uses connectors
@@ -115,7 +108,7 @@ To avoid reconnecting on every question:
 
 - **Tool definitions are cached.** The backend lists a connector's tools once per account (one helper run, about 1–2 seconds) and keeps them in memory until the backend restarts.
 - **Helpers start only when needed.** A helper process starts only when Claude actually calls a connector tool. Questions that don't need Brightspace or Handshake never start one.
-- **Each call uses the signed-in account's saved session.** It runs `trojanclaw_handshake.bridge` or the isolated `trojanclaw_piazza.bridge` with that account's session files only. Reads never open a login window; logins happen through **Connect** or Sign in with USC (Brightspace/Handshake only).
+- **Each call uses the signed-in account's saved session.** It runs `trojanclaw_handshake.bridge` or the isolated `trojanclaw_piazza.bridge` with that account's session files only. Reads never open a login window; logins happen through **Connect** or the USC step of sign-in (Brightspace, Handshake and WebReg).
 - **Expired sessions are left out.** If listing a saved connector's tools fails, the chat carries on without that connector. If a tool call fails, the card switches to **Sign in again**.
 
 While a tool runs, chat shows what it is checking (for example "Checking Brightspace: upcoming due dates"). Connector answers list **Brightspace**, **Handshake** or **Piazza** in the response's `sources`; when the reply cites a specific link a connector returned (an assignment, a job), that link is listed instead.
@@ -142,7 +135,7 @@ connectors/
         cookies.json      # Only Piazza's session_id and piazza_session
 ```
 
-The backend passes the helper only that account's folders (`TROJANCLAW_SESSION_DIR` and `HANDSHAKE_DIR`), so the helper itself needs no account logic. Sign in with USC writes the same files into the signing-in account's folder. It uses an in-memory browser context, so it creates no profile folder and keeps no USC login cookies.
+The backend passes the helper only that account's folders (`TROJANCLAW_SESSION_DIR` and `HANDSHAKE_DIR`), so the helper itself needs no account logic. The USC step of sign-in writes the same files into the signing-in account's folder. It uses an in-memory browser context, so it creates no profile folder and keeps no USC login cookies.
 
 There is no shared cookie file and no manual cookie import. Brightspace receives only its own two session cookies through the child process environment (`D2L_SESSION_COOKIE`); Handshake reads only its own session directory. Cookies and browser profiles never pass through the frontend or HTTP API. Tool results are sent to Anthropic to answer selected-source questions; they are not written to the campus knowledge database.
 
@@ -150,8 +143,9 @@ Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read 
 
 ## Endpoints and verification
 
-- `POST /auth/usc/start`: opens the Sign in with USC popup; optional body `{"left", "top"}` places it. Returns a one-time `attempt_id`.
-- `POST /auth/usc/status` with `{"attempt_id"}`: `waiting`, `failed`, or `done` (sets the session cookie). A finished attempt can be read once.
+- `POST /auth/google/start` (this computer only): returns the Google sign-in URL and sets an HttpOnly attempt cookie. Google redirects back to `/auth/google/callback`, which checks the state and returns to the app.
+- `POST /auth/google/finish`: opens the USC login window; optional body `{"left", "top"}` places it. Returns a one-time `attempt_id`.
+- `POST /auth/google/status` with `{"attempt_id"}`: `waiting`, `failed`, or `done` (sets the session cookie). `POST /auth/google/cancel` stops it.
 - `GET /integrations`: status of the signed-in account's three cards. All `/integrations` routes require a signed-in account.
 - `POST /integrations/{provider}/connect`: starts a login job, returns 202, then the UI polls status.
 - `POST /integrations/{provider}/verify`: checks a saved session.

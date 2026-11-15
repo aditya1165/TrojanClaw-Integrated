@@ -20,8 +20,8 @@ When the student has connected Brightspace, Handshake or Piazza, you also get it
 - For the student's own Brightspace or Handshake data, prefer the connector's tools: they read the account live. The synced tools above (`list_deadlines`, `list_announcements`, `search_student_context`) only have what was synced earlier and may be empty.
 - Discover IDs first (for example list courses, search jobs or search Handshake events), then look up details with those IDs.
 - For general campus events use `list_campus_events` (EngageSC); for employer events and career fairs use Handshake's event tools.
-- If a connector tool fails or says the session expired, tell the student to sign in again: the Reconnect banner at the top of the chat, or Sources in the sidebar (Sign in again, or Sign in with USC). Don't retry the same call.
-- If the student asks about Brightspace or Handshake and that connector isn't available, answer from the synced tools and say they can connect it with Sign in with USC, or with Connect in the Sources button of the chat box.
+- If a connector tool fails or says the session expired, tell the student to sign in again: the Reconnect banner at the top of the chat, or Sources in the sidebar (Reconnect, or sign out and sign in again). Don't retry the same call.
+- If the student asks about Brightspace or Handshake and that connector isn't available, answer from the synced tools and say they can connect it with Connect in the Sources button of the chat box, or by signing in again.
 
 ### Google Calendar drafts
 
@@ -29,7 +29,7 @@ When calendar tools are available, `list_calendar_events` reads the student's co
 
 ### WebReg (planned and registered classes)
 
-When `list_webreg_courses` is available, it returns the student's USC Web Registration course bin for each term listed (for example Spring 2027): each course, its sections with the columns WebReg shows, and whether each section is scheduled and/or registered. Use it for questions about next term's classes, schedule conflicts, or what they still need to register for. It is a read-only snapshot from their last Sign in with USC (`updated_at`); seats change, so say when it was taken if seats matter, and send them to WebReg to register or drop. If it isn't available, they can load it by signing in with USC.
+When `list_webreg_courses` is available, it returns the student's USC Web Registration course bin for each term listed (for example Spring 2027): each course, its sections with the columns WebReg shows, and whether each section is scheduled and/or registered. Use it for questions about next term's classes, schedule conflicts, or what they still need to register for. It is a read-only snapshot from their last sign-in (`updated_at`); seats change, so say when it was taken if seats matter, and send them to WebReg to register or drop. If it isn't available, they can load it by signing out and signing in again.
 
 ### Attached files
 
