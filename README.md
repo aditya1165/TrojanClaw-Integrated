@@ -11,7 +11,7 @@
 This README's feature list describes the original hackathon build. The backend has since been refactored into a single-user API (`backend/app/api`, `services`, `repositories`), and the current behavior differs:
 
 - `POST /chat` is retrieval-augmented chat over the `documents` table with Claude Haiku (`claude-haiku-4-5-20251001`). It does not call any tools yet.
-- Library booking, dining and Google-search tools exist in `backend/app/tools/`, but they are not wired into the current `/chat`. The booking tool never completed a reservation; it only navigated LibCal.
+- The old library booking, dining and Google-search tools (and the unused `routers/` and `rag/` modules) have been removed.
 - Dining hours and deadlines are hard-coded seed data loaded by `push_dining.py` and `push_deadlines.py`. They are not live feeds.
 - Authentication in the frontend is a placeholder: a `localStorage` flag with no real USC sign-in.
 - Answers do not include citations yet.

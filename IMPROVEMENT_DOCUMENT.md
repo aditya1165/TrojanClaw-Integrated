@@ -165,7 +165,5 @@ The release is ready when:
 
 Detailed references:
 
-- `PROJECT_REVIEW.md`
-- `PIAZZA_INTEGRATION_REVIEW.md`
 - `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md`
 
