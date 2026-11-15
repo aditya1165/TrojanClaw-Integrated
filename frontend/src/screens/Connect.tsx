@@ -1,20 +1,9 @@
-import type { ReactNode } from "react";
 import type { Theme } from "../theme";
 import type { AccountProfile, ConnectorProvider } from "../lib/api";
 import { Connectors } from "../components/Connectors";
 import EngageSCPanel from "../EngageSCPanel";
-import { Button, CalendarIcon, LockIcon, Logo, ThemeToggle } from "../components/ui";
-
-interface Service {
-  name: string;
-  description: string;
-  icon: ReactNode;
-}
-
-// Calendar integration is still a placeholder; academic connectors are live below.
-const SERVICES: Service[] = [
-  { name: "Google Calendar", description: "Free time and study blocks", icon: <CalendarIcon /> },
-];
+import { Button, LockIcon, Logo, ThemeToggle } from "../components/ui";
+import { CalendarConnection } from "../components/Calendar";
 
 interface ConnectProps {
   selectedConnectors: ConnectorProvider[];
@@ -50,29 +39,11 @@ export default function Connect({ theme, onToggleTheme, onBack, onContinue, acco
 
         <EngageSCPanel key={account.id} signedIn onSignIn={onBack} />
         <Connectors selected={selectedConnectors} onChange={onConnectorsChange} />
-        <ul className="flex flex-col rounded-2xl border border-line bg-surface">
-          {SERVICES.map((service, index) => (
-            <li
-              key={service.name}
-              className={`flex items-center gap-3.5 px-5 py-4 ${index > 0 ? "border-t border-line" : ""}`}
-            >
-              <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-subtle">
-                {service.icon}
-              </span>
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="text-[15px] font-semibold">{service.name}</span>
-                <span className="text-[13px] text-muted">{service.description}</span>
-              </div>
-              <Button disabled title="Not available yet" className="px-4">
-                Coming soon
-              </Button>
-            </li>
-          ))}
-        </ul>
+        <CalendarConnection />
 
         <p className="flex items-center gap-2 text-[13px] text-muted">
           <LockIcon />
-          Read-only access. TrojanClaw can’t post, submit or change anything.
+          Academic sources are read-only. Google Calendar additions require your approval.
         </p>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">

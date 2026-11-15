@@ -8,10 +8,37 @@ export interface ChatMessage {
 export interface ChatRequest {
   messages: ChatMessage[];
   connectors?: string[];
+  timezone?: string;
+}
+
+export interface CalendarEventDraft {
+  title: string;
+  start: string;
+  end: string;
+  timezone: string;
+  description: string;
+  location: string;
+}
+
+export interface CalendarProposal {
+  id: string;
+  version: number;
+  event: CalendarEventDraft;
+  calendar: string;
+  status: "pending" | "approved" | "applied" | "cancelled";
+  expires_at: string;
+  event_url: string | null;
+}
+
+export interface CalendarStatus {
+  configured: boolean;
+  connected: boolean;
+  calendar: string | null;
 }
 
 export interface ChatResponse {
   response: string;
+  calendar_proposals?: CalendarProposal[];
 }
 
 export const API_BASE_URL =
@@ -129,10 +156,16 @@ export async function chatEndpointFetch(
 
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event("auth-expired"));
-    return response;
+    const data = await response.json().catch(() => null) as { detail?: unknown } | null;
+    const message = typeof data?.detail === "string" ? data.detail : "Could not send your message. Please try again.";
+    return new Response(message, { status: response.status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
   const data = (await response.json()) as ChatResponse;
+
+  window.dispatchEvent(new CustomEvent<CalendarProposal[]>("calendar-drafted", {
+    detail: data.calendar_proposals ?? [],
+  }));
 
   return new Response(data.response, {
     status: response.status,

@@ -1,7 +1,9 @@
 """Chat API models."""
 
 from enum import Enum
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.models.calendar import CalendarProposal
 
 
 class ChatRole(str, Enum):
@@ -29,6 +31,16 @@ class ChatRequest(BaseModel):
 
     messages: list[ChatMessage] = Field(min_length=1, max_length=100)
     connectors: list[str] = Field(default_factory=list, max_length=2)
+    timezone: str = Field(default="America/Los_Angeles", max_length=100)
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Use a valid time zone.") from exc
+        return value
 
     @field_validator("connectors")
     @classmethod
@@ -46,3 +58,4 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    calendar_proposals: list[CalendarProposal] = Field(default_factory=list)

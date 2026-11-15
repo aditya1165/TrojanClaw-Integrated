@@ -2,14 +2,17 @@
 
 from contextlib import contextmanager
 from functools import lru_cache
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Iterator
 
 from psycopg2.extensions import connection
-from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.pool import PoolError, ThreadedConnectionPool
 import psycopg2
 
 from app.config import ConfigurationError, Settings, get_settings
+
+
+POOL_WAIT_SECONDS = 10
 
 
 class Database:
@@ -17,6 +20,9 @@ class Database:
         self._settings = settings
         self._pool: ThreadedConnectionPool | None = None
         self._lock = Lock()
+        # psycopg2's pool raises immediately when all slots are borrowed.
+        # Queue short request bursts without opening more DB connections.
+        self._slots = BoundedSemaphore(settings.database_pool_max)
 
     def _get_pool(self) -> ThreadedConnectionPool:
         if not self._settings.database_url:
@@ -36,15 +42,20 @@ class Database:
     @contextmanager
     def connection(self) -> Iterator[connection]:
         pool = self._get_pool()
-        database_connection = pool.getconn()
+        if not self._slots.acquire(timeout=POOL_WAIT_SECONDS):
+            raise PoolError("Timed out waiting for an available database connection.")
         try:
-            yield database_connection
-            database_connection.commit()
-        except Exception:
-            database_connection.rollback()
-            raise
+            database_connection = pool.getconn()
+            try:
+                yield database_connection
+                database_connection.commit()
+            except Exception:
+                database_connection.rollback()
+                raise
+            finally:
+                pool.putconn(database_connection)
         finally:
-            pool.putconn(database_connection)
+            self._slots.release()
 
     def ping(self) -> None:
         with self.connection() as database_connection:

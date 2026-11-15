@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getConnectors, type ConnectorProvider, type ConnectorStatus } from "../lib/api";
+import { apiRequest, getConnectors, type CalendarStatus, type ConnectorProvider, type ConnectorStatus } from "../lib/api";
 import { Button } from "./ui";
 
 // Sources the backend connects automatically after Sign in with USC.
@@ -9,13 +9,25 @@ const SETUP: { provider: ConnectorProvider; label: string }[] = [
 ];
 
 interface SetupScreenProps {
+  includeCalendar?: boolean;
   // Called with the sources that ended up connected (they are turned on for chat).
   onDone: (connected: ConnectorProvider[]) => void;
 }
 
-export default function SetupScreen({ onDone }: SetupScreenProps) {
+export default function SetupScreen({ onDone, includeCalendar = false }: SetupScreenProps) {
   const [statuses, setStatuses] = useState<ConnectorStatus[] | null>(null);
   const [error, setError] = useState("");
+  const [calendar, setCalendar] = useState<CalendarStatus | null>(null);
+  const [calendarError, setCalendarError] = useState(false);
+
+  useEffect(() => {
+    if (!includeCalendar) return;
+    let active = true;
+    apiRequest<CalendarStatus>("/calendar/status")
+      .then((value) => { if (active) setCalendar(value); })
+      .catch(() => { if (active) setCalendarError(true); });
+    return () => { active = false; };
+  }, [includeCalendar]);
 
   useEffect(() => {
     let active = true;
@@ -33,9 +45,9 @@ export default function SetupScreen({ onDone }: SetupScreenProps) {
   }, []);
 
   const stateOf = (provider: ConnectorProvider) => statuses?.find((item) => item.provider === provider);
-  const finished = statuses !== null && SETUP.every(({ provider }) => stateOf(provider)?.state !== "connecting");
+  const finished = statuses !== null && SETUP.every(({ provider }) => stateOf(provider)?.state !== "connecting") && (!includeCalendar || calendar !== null || calendarError);
   const connected = SETUP.map(({ provider }) => provider).filter((provider) => stateOf(provider)?.state === "connected");
-  const allConnected = finished && connected.length === SETUP.length;
+  const allConnected = finished && connected.length === SETUP.length && (!includeCalendar || calendar?.connected);
 
   // Everything worked: continue by itself after a moment.
   useEffect(() => {
@@ -77,6 +89,12 @@ export default function SetupScreen({ onDone }: SetupScreenProps) {
               </li>
             );
           })}
+          {includeCalendar && <li className="flex items-center gap-3 rounded-xl bg-subtle px-4 py-3">
+            <StatusMark state={calendar?.connected ? "connected" : calendar || calendarError ? "needs_login" : "connecting"} />
+            <div className="flex min-w-0 flex-1 flex-col"><span className="text-[15px] font-medium">Google Calendar</span>
+              <span className="break-words text-[13px] text-muted">{calendar?.connected ? `Connected: ${calendar.calendar}` : calendar || calendarError ? "Connect later from your sources" : "Checking connection…"}</span>
+            </div>
+          </li>}
         </ul>
 
         {error && <p role="alert" className="text-sm text-error">{error}</p>}

@@ -49,8 +49,8 @@ export default function Landing({ theme, onToggleTheme, onContinue, onOpenChat, 
             Every deadline, planned around your week.
           </h1>
           <p className="max-w-xl text-lg leading-relaxed text-muted">
-            Ask about USC and explore public campus events. Brightspace, Piazza and Google Calendar
-            connections are coming soon.
+            Ask about USC, explore campus events, and connect your academic sources.
+            Add events to Google Calendar after reviewing and approving them.
           </p>
           <div className="mt-2 flex flex-wrap justify-center gap-3">
             <Button onClick={onContinue} disabled={checkingSession} className="min-h-12 px-5 text-[15px]">
@@ -63,7 +63,7 @@ export default function Landing({ theme, onToggleTheme, onContinue, onOpenChat, 
           </div>
           <p className="inline-flex items-center gap-1.5 text-[13px] text-muted">
             <LockIcon />
-            Read-only. TrojanClaw never posts, submits, or sees your USC password.
+            Academic sources are read-only. Calendar additions always need your approval.
           </p>
         </section>
 

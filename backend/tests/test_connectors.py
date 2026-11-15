@@ -124,7 +124,8 @@ def test_connector_chat_preserves_authenticated_engagesc_context(monkeypatch):
     assert "Robotics workshop" in model.respond_with_tools.call_args.args[1]
 
 
-def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch):
+@pytest.mark.parametrize("require_tool", [False, True])
+def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch, require_tool):
     class Block:
         type = "tool_use"
         id = "call1"
@@ -159,9 +160,11 @@ def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch):
     calls = []
     request = ChatRequest(messages=[{"role": "user", "content": "My profile?"}])
     answer = model.respond_with_tools(request.messages, "system", [{"name": Block.name}],
-                                     lambda *args: calls.append(args) or "profile data")
+                                     lambda *args: calls.append(args) or "profile data", require_tool=require_tool)
     assert answer == "Your profile"
     assert calls == [(Block.name, {})]
+    assert requests[0].get("tool_choice") == ({"type": "any"} if require_tool else None)
+    assert "tool_choice" not in requests[1]
     assert requests[-1]["messages"][-1]["content"][0]["type"] == "tool_result"
 
 

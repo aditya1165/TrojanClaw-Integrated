@@ -16,14 +16,24 @@ export default function App() {
   const [account, setAccount] = useState<AccountProfile | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
-  const [showAuth, setShowAuth] = useState(false);
+  const [resumeGoogle, setResumeGoogle] = useState(() => ["ready", "error"].includes(new URLSearchParams(window.location.search).get("google_signin") || ""));
+  const [showAuth, setShowAuth] = useState(resumeGoogle);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [afterAuth, setAfterAuth] = useState<Screen>("connect");
+  const [afterAuth, setAfterAuth] = useState<Screen>(resumeGoogle ? "chat" : "connect");
   const [notice, setNotice] = useState("");
   const [selectedConnectors, setSelectedConnectors] = useState<ConnectorProvider[]>([]);
   // After Sign in with USC the backend connects sources in the background; show its progress.
   const [settingUp, setSettingUp] = useState(false);
+  const [googleSetup, setGoogleSetup] = useState(false);
   const { theme, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("google_signin")) {
+      url.searchParams.delete("google_signin");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -99,16 +109,18 @@ export default function App() {
           onContinue={() => openScreen("connect")} onOpenChat={() => openScreen("chat")}
           onCreateAccount={() => openScreen("connect", "register")} />
       )}
-      {showAuth && <AuthDialog key={authMode} initialMode={authMode} onClose={() => setShowAuth(false)}
-        onSubmit={(profile, viaUsc) => {
+      {showAuth && <AuthDialog key={authMode} initialMode={authMode} resumeGoogle={resumeGoogle} onClose={() => { setShowAuth(false); setResumeGoogle(false); }}
+        onSubmit={(profile, viaUsc, signInNotice) => {
+          setGoogleSetup(resumeGoogle);
           setSelectedConnectors([]);
           setAccount(profile);
           setShowAuth(false);
-          setNotice("");
+          setResumeGoogle(false);
+          setNotice(signInNotice || "");
           setScreen(afterAuth);
           setSettingUp(viaUsc);
         }} />}
-      {settingUp && <SetupScreen onDone={(connected) => {
+      {settingUp && <SetupScreen includeCalendar={googleSetup} onDone={(connected) => {
         setSettingUp(false);
         setSelectedConnectors(connected);
         setScreen("chat");

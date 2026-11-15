@@ -34,6 +34,15 @@ Open `http://127.0.0.1:5173`. The first Brightspace tool call may download the p
 
 ## Sign in with USC (one login for everything)
 
+The sign-in dialog also offers **Continue with USC Google** when Calendar OAuth
+is configured. It completes Google authorization in the normal browser, then
+automatically starts the USC flow below, validates both sign-in identities, and
+connects the primary calendar through Google's official MCP server. The current
+USC helper uses a separate browser session and may require another USC/Duo step.
+Calendar uses the local open-source nspady MCP server with the standard Calendar API.
+Install its dependencies with `npm ci --prefix integrations/google-calendar`.
+Register both callback URIs; see [Google Calendar setup](docs/google-calendar.md).
+
 **Sign in with USC** signs the student in to TrojanClaw and connects Brightspace and Handshake with a single USC login (password + Duo).
 
 1. Click **Sign in**, then **Sign in with USC**. A small Chrome popup opens over the app on Brightspace. Its address bar stays visible so the student can check it is the real USC login page.

@@ -11,6 +11,7 @@ Connector notes:
 - [docs/brightspace.md](docs/brightspace.md): `brightspace-mcp-server@5.2.3`, sign-in, tool allowlist
 - [handshake.md](handshake.md): Handshake MCP connector and allowlist
 - [docs/piazza.md](docs/piazza.md): `mcp-piazza`, login methods, tool allowlist (Piazza cannot use the USC login)
+- [docs/google-calendar.md](docs/google-calendar.md): Google OAuth setup, event proposals, and mandatory approval
 
 ## Layout
 

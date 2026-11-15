@@ -116,7 +116,22 @@ def connect_handshake(page) -> None:
 SETUP: dict[str, Callable] = {"handshake": connect_handshake}
 
 
-def browser_login(position: Position, on_signed_in: SignedIn) -> None:
+def verify_brightspace_identity(whoami: dict, expected_email: str) -> None:
+    """Reject contradictory email identities, never turn an opaque ID into email.
+
+    USC's WhoAmI UniqueName can be a numeric student identifier. Both providers
+    are authenticated within the browser-bound onboarding attempt; the app
+    account is always selected by Brightspace Identifier, never a guessed email.
+    """
+    identifier = str(whoami.get("Identifier") or "").strip()
+    username = str(whoami.get("UniqueName") or "").strip().casefold()
+    if not identifier or not username:
+        raise HTTPException(502, "Brightspace did not return a complete signed-in identity. Please reconnect.")
+    if "@" in username and username != expected_email.strip().casefold():
+        raise HTTPException(403, "Google and Brightspace signed into different USC accounts. Retry using the same USC account for both.")
+
+
+def browser_login(position: Position, on_signed_in: SignedIn, *, expected_email: str | None = None) -> None:
     """Run the USC sign-in popup, report who signed in, then set up the connectors."""
     from playwright.sync_api import sync_playwright
 
@@ -137,6 +152,8 @@ def browser_login(position: Position, on_signed_in: SignedIn) -> None:
                 raise TimeoutError("The USC login was not finished in time.")
             logger.info("USC login: Brightspace login detected, asking who logged in")
             whoami = read_whoami(page)
+            if expected_email:
+                verify_brightspace_identity(whoami, expected_email)
             save_json("brightspace", "cookies.json", context.cookies(["https://brightspace.usc.edu"]))
             connectors.set_state("brightspace", IntegrationState.connected)
             for provider in SETUP:  # before on_signed_in, so "Setting things up" sees them at once
@@ -159,6 +176,7 @@ def browser_login(position: Position, on_signed_in: SignedIn) -> None:
 class UscAttempt:
     status: str = "waiting"  # waiting | failed | done
     whoami: dict | None = None
+    detail: str | None = None
     started: float = field(default_factory=time.monotonic)
 
 
@@ -170,7 +188,7 @@ class UscLogin:
         self._attempts: dict[str, UscAttempt] = {}
         self._lock = threading.Lock()
 
-    def start(self, position: Position = None) -> str:
+    def start(self, position: Position = None, *, expected_email: str | None = None) -> str:
         with self._lock:
             now = time.monotonic()
             for attempt_id, attempt in list(self._attempts.items()):
@@ -181,17 +199,24 @@ class UscLogin:
             attempt_id = secrets.token_urlsafe(32)
             attempt = UscAttempt()
             self._attempts[attempt_id] = attempt
-        threading.Thread(target=self._run, args=(attempt, position), daemon=True).start()
+        threading.Thread(target=self._run, args=(attempt, position, expected_email), daemon=True).start()
         return attempt_id
 
-    def _run(self, attempt: UscAttempt, position: Position) -> None:
+    def _run(self, attempt: UscAttempt, position: Position, expected_email: str | None = None) -> None:
         def signed_in(whoami: dict) -> None:
             attempt.whoami = whoami
             attempt.status = "done"
             logger.info("USC login: finished, Brightspace user %s", whoami.get("Identifier"))
 
         try:
-            self._run_login(position, signed_in)
+            if expected_email:
+                self._run_login(position, signed_in, expected_email=expected_email)
+            else:
+                self._run_login(position, signed_in)
+        except HTTPException as exc:
+            if attempt.status == "waiting":
+                attempt.detail = exc.detail
+                attempt.status = "failed"
         except Exception:
             logger.exception("USC login failed")
             if attempt.status == "waiting":  # a failure during setup does not undo the sign-in

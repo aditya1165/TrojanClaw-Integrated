@@ -7,6 +7,7 @@ import { API_BASE_URL, chatEndpointFetch } from "../lib/api";
 import type { AccountProfile, ConnectorProvider } from "../lib/api";
 import { Connectors } from "../components/Connectors";
 import EngageSCPanel from "../EngageSCPanel";
+import { CalendarConnection, CalendarProposals } from "../components/Calendar";
 import type { Theme } from "../theme";
 import { ArrowUpIcon, Button, Logo, PlusIcon, StopIcon, ThemeToggle } from "../components/ui";
 
@@ -38,6 +39,7 @@ export default function Chat({ theme, onToggleTheme, onHome, onConnect, account,
       streamProtocol: "text",
       experimental_prepareRequestBody: ({ messages: uiMessages }) => ({
         connectors: selectedConnectors,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         messages: uiMessages
           .map((message) => ({
             role: message.role === "assistant" ? "assistant" : "user",
@@ -87,6 +89,7 @@ export default function Chat({ theme, onToggleTheme, onHome, onConnect, account,
         <EngageSCPanel key={account.id} signedIn onSignIn={onHome} />
 
         <Connectors selected={selectedConnectors} onChange={onConnectorsChange} />
+        <CalendarConnection />
         <div className="flex items-center justify-between gap-2 border-t border-line pt-4">
           <div className="min-w-0 text-sm"><p className="truncate font-medium">{account.name}</p><p className="truncate text-xs text-muted">@{account.username}</p></div>
           <Button variant="ghost" onClick={onSignOut} disabled={signingOut}>{signingOut ? "Signing out..." : "Sign out"}</Button>
@@ -133,6 +136,7 @@ export default function Chat({ theme, onToggleTheme, onHome, onConnect, account,
               </div>
             )}
 
+            <CalendarProposals refreshKey={`${status}:${messages.length}`} />
             <div ref={endOfMessagesRef} />
           </div>
         </div>
@@ -173,7 +177,7 @@ export default function Chat({ theme, onToggleTheme, onHome, onConnect, account,
             )}
           </form>
           <p className="text-center text-xs text-muted">
-            TrojanClaw only reads your data. Double-check important dates in Brightspace.
+            Calendar additions require your approval. Double-check important dates in Brightspace.
           </p>
         </div>
       </main>

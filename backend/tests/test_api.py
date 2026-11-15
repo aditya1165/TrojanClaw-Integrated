@@ -70,4 +70,4 @@ def test_chat_preserves_frontend_response_contract() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {"response": "Hello from TrojanClaw"}
+    assert response.json() == {"response": "Hello from TrojanClaw", "calendar_proposals": []}

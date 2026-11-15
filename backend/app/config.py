@@ -58,6 +58,15 @@ class Settings:
     anthropic_model: str
     single_user_id: UUID
     single_user_name: str
+    google_calendar_client_id: str | None = None
+    google_calendar_client_secret: str | None = None
+    google_calendar_redirect_uri: str = "http://localhost:8000/calendar/callback"
+    google_calendar_frontend_url: str = "http://localhost:5173"
+    google_calendar_encryption_key: str | None = None
+
+    @property
+    def google_signin_redirect_uri(self) -> str:
+        return self.google_calendar_redirect_uri.removesuffix("/calendar/callback") + "/auth/google/callback"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -93,11 +102,25 @@ class Settings:
             ).strip(),
             single_user_id=user_id,
             single_user_name=os.getenv("SINGLE_USER_NAME", "TrojanClaw User").strip(),
+            google_calendar_client_id=_optional("GOOGLE_CALENDAR_CLIENT_ID"),
+            google_calendar_client_secret=_optional("GOOGLE_CALENDAR_CLIENT_SECRET"),
+            google_calendar_redirect_uri=os.getenv("GOOGLE_CALENDAR_REDIRECT_URI", "http://localhost:8000/calendar/callback").strip(),
+            google_calendar_frontend_url=os.getenv("GOOGLE_CALENDAR_FRONTEND_URL", "http://localhost:5173").strip().rstrip("/"),
+            google_calendar_encryption_key=_optional("GOOGLE_CALENDAR_ENCRYPTION_KEY"),
         )
         settings.validate()
         return settings
 
     def validate(self) -> None:
+        if self.google_calendar_client_id:
+            if self.google_calendar_frontend_url not in self.cors_origins:
+                raise ConfigurationError("GOOGLE_CALENDAR_FRONTEND_URL must be a trusted CORS origin.")
+            redirect = urlparse(self.google_calendar_redirect_uri)
+            if (redirect.scheme != "https" and not (
+                self.app_env in {"development", "test"} and redirect.scheme == "http"
+                and redirect.hostname in {"localhost", "127.0.0.1"}
+            )) or redirect.path != "/calendar/callback" or redirect.query or redirect.fragment:
+                raise ConfigurationError("Use an HTTPS GOOGLE_CALENDAR_REDIRECT_URI ending in /calendar/callback (HTTP localhost is allowed in development).")
         if self.database_pool_min < 1:
             raise ConfigurationError("DATABASE_POOL_MIN must be at least 1.")
         if self.database_pool_max < self.database_pool_min:
