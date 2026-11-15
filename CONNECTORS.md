@@ -2,9 +2,11 @@
 
 The main chat supports Brightspace and Handshake with separate persistent Chromium profiles. Piazza is shown as **Coming soon** and cannot be selected or called.
 
+Once a connector has a saved session, chat uses it automatically: the student signs in once (Sign in with USC or **Connect**) and then just asks. See [How chat uses connectors](#how-chat-uses-connectors).
+
 ## Local setup
 
-Requirements: Git, uv, Python 3.11 for FastAPI, Python 3.12–3.14 for the connector helper, Node.js 22 or newer for Brightspace and the frontend, and Google Chrome (Sign in with USC opens its popup in the installed Chrome). Run the backend on your own computer, in a single process, bound to `127.0.0.1`. The persistent browser profiles belong to that computer's owner; this prototype is not a hosted multi-user authentication service.
+Requirements: Git, uv, Python 3.11 for FastAPI, Python 3.12–3.14 for the connector helper, Node.js 22 or newer for Brightspace and the frontend, and Google Chrome (Sign in with USC opens its popup in the installed Chrome). Run the backend on your own computer, in a single process, bound to `127.0.0.1`. The persistent browser profiles belong to that computer's owner; this prototype is not a hosted multi-user authentication service. Saved sessions are per TrojanClaw account (see [Persistent storage](#persistent-storage) below).
 
 From the repository root:
 
@@ -13,7 +15,7 @@ uv sync --locked --project integrations/handshake
 uv run --locked --project integrations/handshake patchright install chromium
 ```
 
-Configure `backend/.env` using `backend/.env.example`. `ANTHROPIC_API_KEY` is required for connected chat. Database/OpenAI configuration is only needed for the original campus-knowledge chat when no connectors are selected. No USC password goes into this file.
+Configure `backend/.env` using `backend/.env.example`. Chat needs `ANTHROPIC_API_KEY`, plus `DATABASE_URL` and `GEMINI_API_KEY` for the TrojanClaw tools (campus search, EngageSC events, synced course data). The Claude model and agent tools are set in `config/agent.yaml`, not in `.env`. No USC password goes into this file.
 
 Start the backend in one terminal:
 
@@ -67,11 +69,35 @@ The backend must run on the student's computer, because the popup opens there.
 1. Click **Connect** on Brightspace or Handshake.
 2. A Chromium window opens with that connector's saved profile. Complete your usual school login and Duo/MFA yourself.
 3. The helper saves the browser session automatically, closes the window, and verifies it through a read-only MCP call. The card changes from **Waiting for sign-in** to **Connected** only after that succeeds.
-4. Ask in the main chat. Newly connected sources are enabled automatically. Use the **Use in chat** checkboxes to choose which sources the model can read.
+4. Ask in the main chat. Every connector with a saved session is available automatically; you don't need to reconnect or tick anything for each question. Ticking **Use in chat** forces a connector into the chat and shows an error right away if its session no longer works.
 
 Examples: "What's due this week?", "Show my latest course announcements", "Find software engineering internships on Handshake".
 
-After an app restart, cards with stored session data show **Session saved**. Click **Check session** to verify it, or select **Use in chat** to try it directly. If a school expires the session, click **Sign in again**. Persisting a browser profile does not prevent session expiry or future MFA prompts.
+After an app restart, cards with stored session data show **Session saved**, and chat keeps using them. Click **Check session** to verify one. If a school expires the session, a connector tool call fails, the card changes to **Sign in again**, and chat stops using that connector until you sign in again. Persisting a browser profile does not prevent session expiry or future MFA prompts.
+
+## How chat uses connectors
+
+Chat runs one Claude agent (`backend/app/agent/runtime.py`, configured in `config/agent.yaml` and `prompts/ai_instructions.md`). Each run gets:
+
+- **TrojanClaw MCP tools** (`backend/app/mcp_server/server.py`), bound to the signed-in account: `list_deadlines`, `list_announcements`, `search_student_context`, `search_campus_knowledge`, `list_campus_events`, `get_data_status`.
+- **Connector tools** for each live connector, named `brightspace__<tool>` and `handshake__<tool>`. A connector is included when:
+  - the student ticked **Use in chat** for it (the request's `connectors` list), or
+  - its card state is **Session saved** or **Connected** for the signed-in account, and the request comes from this computer (the same loopback and origin check as the connector endpoints).
+
+  Connectors are also limited by `goals.chat.connectors` in `config/agent.yaml`.
+
+- **Google Calendar draft tool** (`propose_calendar_event`), when Google Calendar is configured. It only creates a proposal card; the event is saved only when the student clicks Approve (see [Google Calendar setup](docs/google-calendar.md)). Each reply can create at most one card, and a draft whose times don't match an explicit time range in the latest message (such as "3pm to 3.20pm") is rejected. If Claude says it drafted an event without calling the tool, or its draft was rejected, chat retries once with only the calendar tools, and otherwise asks the student for the missing details.
+
+Claude decides which tools a question needs. The prompt tells it to prefer the live connector tools for the student's own Brightspace and Handshake data, to look up IDs (courses, jobs) before details, and to send the student to the connector card when a session has expired.
+
+To avoid reconnecting on every question:
+
+- **Tool definitions are cached.** The backend lists a connector's tools once per account (one helper run, about 1–2 seconds) and keeps them in memory until the backend restarts.
+- **Helpers start only when needed.** A helper process starts only when Claude actually calls a connector tool. Questions that don't need Brightspace or Handshake never start one.
+- **Each call uses the signed-in account's saved session.** It runs `trojanclaw_handshake.bridge` with that account's session files only. It never opens a login window; logins happen only through **Connect** or Sign in with USC.
+- **Expired sessions are left out.** If listing a saved connector's tools fails, the chat carries on without that connector. If a tool call fails, the card switches to **Sign in again**.
+
+Connector answers list **Brightspace** or **Handshake** in the response's `sources`.
 
 ## Persistent storage
 
@@ -105,9 +131,9 @@ Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read 
 - `GET /integrations`: status of the signed-in account's three cards. All `/integrations` routes require a signed-in account.
 - `POST /integrations/{provider}/connect`: starts a login job, returns 202, then the UI polls status.
 - `POST /integrations/{provider}/verify`: checks a saved session.
-- `POST /chat`: accepts optional `connectors: ["brightspace", "handshake"]` and runs a bounded read-only tool loop.
+- `POST /chat`: runs the agent for the signed-in account. Saved connector sessions are used automatically for requests from this computer. Optional `connectors: ["brightspace", "handshake"]` forces those connectors (only from this computer). Optional `timezone` (IANA name, default `America/Los_Angeles`) sets the dates the agent uses. Returns `{response, sources, calendar_proposals}`. The number of tool rounds is capped by `max_tool_rounds` in `config/agent.yaml`.
 
-Login, verification, and connector chat requests require a loopback client and an allowed frontend origin. Keep `CORS_ORIGINS` limited to the local frontend. Only one sign-in job per connector can run in a backend process at a time.
+Login, verification, and connector chat requests (including automatic use of saved sessions) require a loopback client and an allowed frontend origin. Keep `CORS_ORIGINS` limited to the local frontend. Only one sign-in job per connector can run in a backend process at a time.
 
 ```sh
 uv run --locked --project integrations/handshake --group dev pytest integrations/handshake/tests -q

@@ -56,6 +56,17 @@ class ChatRequest(BaseModel):
         return self
 
 
+class Source(BaseModel):
+    """Where part of an answer came from (a deadline, post, announcement or web page)."""
+
+    title: str
+    url: str | None = None
+    course: str | None = None
+    kind: str | None = None
+
+
 class ChatResponse(BaseModel):
     response: str
+    sources: list[Source] = Field(default_factory=list)
+    # Calendar drafts made during this reply; each needs the student's Approve click.
     calendar_proposals: list[CalendarProposal] = Field(default_factory=list)

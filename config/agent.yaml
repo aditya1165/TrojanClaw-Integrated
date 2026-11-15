@@ -1,0 +1,42 @@
+# TrojanClaw agent configuration. Editing this file changes agent behavior with no code change.
+# Restart the backend after editing.
+
+# Claude model and settings for every goal unless a goal overrides them.
+# For a much cheaper agent use `claude-haiku-5-5`, and delete `request_options`
+# (server-side refusal fallbacks are not available for Haiku).
+model: claude-opus-5-5
+effort: low                    # low | medium | high | xhigh | max
+max_tokens: 16000
+max_tool_rounds: 8             # stop after this many Claude <-> tool round trips
+
+# The system prompt (path relative to the repository root).
+system_prompt_file: prompts/ai_instructions.md
+
+# Extra request options. `fallbacks: default` retries a declined request on a fallback model.
+request_options:
+  betas: [server-side-fallback-2026-07-01]
+  fallbacks: default
+
+# Vector search settings shared by the search tools. With gemini-embedding-001 a relevant
+# passage scored ~0.70 and an unrelated one ~0.54, so 0.6 drops clear misses.
+# Re-tune once real data is synced.
+retrieval:
+  min_similarity: 0.6
+  per_source_limit: 2          # campus search: at most this many chunks from one page
+
+# Goals: what the agent is asked to do, and which TrojanClaw MCP tools it may use.
+goals:
+  chat:
+    tools:
+      - list_deadlines
+      - list_announcements
+      - search_student_context
+      - search_campus_knowledge
+      - list_campus_events
+      - get_data_status
+    # Live read-only connectors the student can tick in chat ("Use in chat"). Their tools
+    # (`brightspace__*`, `handshake__*`) are added only when selected; the connector
+    # helper keeps its own tool allowlist (see CONNECTORS.md).
+    connectors:
+      - brightspace
+      - handshake

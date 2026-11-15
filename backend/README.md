@@ -27,9 +27,9 @@ backend/
 └── README.md
 ```
 
-The application supports username/password accounts. Chat searches are scoped to
-the signed-in account, never the seeded demo user. Existing ingestion commands
-still use `SINGLE_USER_ID`; their historical rows are not reassigned to new accounts.
+The application supports username/password accounts. Chat runs the agent for the
+signed-in account: course tools read only that account's rows, while campus search
+and EngageSC events are shared public data. See `TrojanClaw_v2_Architecture_and_Spec.md` (§2.0, §5.9).
 Account authentication is separate from extension linking.
 
 ## EngageSC public events
@@ -60,8 +60,8 @@ Authenticated endpoints:
 - `POST /integrations/engagesc/disconnect`: unlink only the current account.
 - `GET /integrations/engagesc/events?days=30&search=&limit=30`: public cached events.
 
-The copilot receives a limited selection of up to 30 events in the next 30 days
-when the account is linked. **View events** supports broader searches. Linking
+When the account is linked, the chat agent can call its `list_campus_events` tool
+(keyword search, up to 90 days ahead). **View events** in the sidebar does the same. Linking
 does not copy another account's extension settings or private academic data.
 Set `RUN_ENGAGESC_DB_TESTS=1` when running pytest to exercise the live feed,
 database persistence, search, and account isolation with temporary accounts.

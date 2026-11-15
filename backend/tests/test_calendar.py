@@ -1,5 +1,6 @@
 """Approval boundaries, account isolation, and recovery without live Google writes."""
 
+import asyncio
 from copy import deepcopy
 import os
 from datetime import datetime, timedelta, timezone
@@ -12,8 +13,9 @@ from fastapi.testclient import TestClient
 import httpx
 from pydantic import ValidationError
 import pytest
-from openai import RateLimitError
+from anthropic.lib.tools import ToolError
 
+from app.agent.runtime import AgentResult
 from app.errors import AppError, DependencyUnavailableError
 from app.main import app
 from app.models.calendar import CalendarEventDraft
@@ -237,115 +239,101 @@ def test_oauth_tokens_are_encrypted_and_permissions_required(service):
     service.mcp.verify.assert_called_once_with("access")
 
 
-@pytest.mark.parametrize("embedding_failure", [None, "quota", "unconfigured"])
-def test_chat_tool_only_drafts_and_has_no_approval_tool(service, embedding_failure):
-    model = MagicMock()
-    def respond(messages, prompt, tools, call):
-        assert {tool["name"] for tool in tools} == {"propose_calendar_event"}
-        assert "Chat replies including 'yes' cannot approve" in prompt
-        if embedding_failure:
-            assert "Campus document search is temporarily unavailable" in prompt
-            assert "Do not invent source facts" in prompt
-        assert "nothing was added" in call("propose_calendar_event", draft().model_dump(mode="json"))
+class FakeRuntime:
+    """Stands in for the agent. `script(call_number, kwargs, tools)` plays Claude and returns the reply."""
+
+    def __init__(self, script):
+        self.script = script
+        self.calls = []
+
+    async def run(self, goal, messages, **kwargs):
+        self.calls.append(kwargs)
+        tools = {tool.name: tool for tool in kwargs.get("extra_tools", [])}
+        return AgentResult(text=await self.script(len(self.calls), kwargs, tools))
+
+
+def chat(runtime, service, content="Add a study session", **request):
+    messages = content if isinstance(content, list) else [{"role": "user", "content": content}]
+    return asyncio.run(ChatService(runtime, calendar=service).chat(
+        ChatRequest(messages=messages, **request), user_id=USER))
+
+
+def test_chat_tool_only_drafts_and_has_no_approval_tool(service):
+    async def script(number, kwargs, tools):
+        assert set(tools) == {"propose_calendar_event"}
+        assert "Chat replies including 'yes' cannot approve" in kwargs["extra_instructions"]
+        assert "nothing was added" in await tools["propose_calendar_event"].call(draft().model_dump(mode="json"))
         return "Review the proposal."
-    model.respond_with_tools.side_effect = respond
-    embeddings, documents = MagicMock(), MagicMock()
-    if embedding_failure == "quota":
-        embeddings.embed.side_effect = RateLimitError(
-            "No credits remaining", response=httpx.Response(429, request=httpx.Request("POST", "https://example.com/embeddings")),
-            body={"error": {"code": "credit_balance_exhausted"}},
-        )
-    elif embedding_failure == "unconfigured":
-        embeddings.embed.side_effect = DependencyUnavailableError("OpenAI embeddings")
-    documents.search.return_value = []
-    chat = ChatService(None, embeddings, documents, model, calendar=service)
-    response = chat.chat(ChatRequest(messages=[{"role": "user", "content": "Add a study session"}]), user_id=USER)
+
+    response = chat(FakeRuntime(script), service)
     assert "new calendar proposal" in response.response
     assert len(response.calendar_proposals) == 1
-    if embedding_failure:
-        documents.search.assert_not_called()
     service.request.assert_not_called()
 
 
-def test_repeated_tool_calls_cannot_create_multiple_cards_for_one_confirmation(service):
-    model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
-    documents.search.return_value = []
-    event = draft()
+def test_without_google_calendar_the_agent_gets_no_draft_tool_and_is_told_so(service):
+    service.settings.google_calendar_client_id = None
 
-    def respond(messages, prompt, tools, call):
-        first = call("propose_calendar_event", event.model_dump(mode="json"))
-        duplicate = call("propose_calendar_event", event.model_dump(mode="json"))
-        assert str(next(iter(service.repository.rows))) in first
-        assert "already has a review card" in duplicate
-        other = event.model_copy(update={"start": event.start + timedelta(hours=4), "end": event.end + timedelta(hours=4)})
-        with pytest.raises(AppError, match="already created"):
-            call("propose_calendar_event", other.model_dump(mode="json"))
-        return "I've prepared new calendar proposals."
+    async def script(number, kwargs, tools):
+        assert tools == {}
+        assert "Google Calendar is not configured" in kwargs["extra_instructions"]
+        return "I can't add events yet."
 
-    model.respond_with_tools.side_effect = respond
-    result = ChatService(None, embeddings, documents, model, calendar=service).chat(
-        ChatRequest(messages=[{"role": "user", "content": "yes"}]), user_id=USER,
-    )
-    assert len(result.calendar_proposals) == len(service.repository.rows) == 1
-    assert "a new calendar proposal" in result.response
-    service.request.assert_not_called()
+    assert chat(FakeRuntime(script), service).response == "I can't add events yet."
 
 
-def test_selected_connectors_and_calendar_drafts_work_together_for_the_signed_in_account(service, monkeypatch):
-    connectors = MagicMock()
-    connectors.tools.return_value = [{"name": "brightspace__courses"}]
-    connectors.call.return_value = "Course information"
-    monkeypatch.setattr("app.services.chat.get_local_connectors", lambda: connectors)
-    model = MagicMock()
+def test_invalid_draft_is_a_tool_error_and_creates_nothing(service):
+    async def script(number, kwargs, tools):
+        bad = {**draft().model_dump(mode="json"), "timezone": "Mars/Base"}
+        with pytest.raises(ToolError):
+            await tools["propose_calendar_event"].call(bad)
+        return "Which time zone should I use?"
 
-    def respond(messages, prompt, tools, call):
-        assert {tool["name"] for tool in tools} == {"brightspace__courses", "propose_calendar_event"}
-        assert call("brightspace__courses", {}) == "Course information"
-        call("propose_calendar_event", draft().model_dump(mode="json"))
+    response = chat(FakeRuntime(script), service)
+    assert response.response == "Which time zone should I use?"
+    assert response.calendar_proposals == [] and service.repository.rows == {}
+
+
+def test_selected_connectors_and_calendar_drafts_work_together_for_the_signed_in_account(service):
+    async def script(number, kwargs, tools):
+        assert kwargs["user_id"] == USER and list(kwargs["connectors"]) == ["brightspace"]
+        assert kwargs["timezone"] == "America/Chicago"
+        await tools["propose_calendar_event"].call(draft().model_dump(mode="json"))
         return "Review the event."
 
-    model.respond_with_tools.side_effect = respond
-    response = ChatService(None, None, None, model, calendar=service).chat(
-        ChatRequest(messages=[{"role": "user", "content": "Add a study session"}], connectors=["brightspace"]),
-        user_id=USER,
-    )
-    connectors.tools.assert_called_once_with(USER, ["brightspace"])
-    connectors.call.assert_called_once_with(USER, "brightspace__courses", {}, ["brightspace"])
+    response = chat(FakeRuntime(script), service, connectors=["brightspace"], timezone="America/Chicago")
     assert len(response.calendar_proposals) == 1 and response.calendar_proposals[0].status == "pending"
     service.request.assert_not_called()
 
 
 def test_followup_recovers_missing_draft_call_and_returns_a_new_approval_card(service):
-    model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
-    documents.search.return_value = []
     base = draft().start.replace(hour=16, minute=0)
     first_event = draft().model_copy(update={"start": base, "end": base + timedelta(hours=1)})
     second_event = first_event.model_copy(update={
         "start": first_event.start + timedelta(hours=4),
         "end": first_event.start + timedelta(hours=5, minutes=30),
     })
-    calls = []
 
-    def respond(messages, prompt, tools, call, **kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            call("propose_calendar_event", first_event.model_dump(mode="json"))
+    async def script(number, kwargs, tools):
+        if number == 1:
+            await tools["propose_calendar_event"].call(first_event.model_dump(mode="json"))
             return "Review the first event."
-        if len(calls) == 2:
+        if number == 2:
             return "I've drafted a second calendar event for you. A proposal card should now appear."
-        assert kwargs == {"require_tool": True}
-        assert {tool["name"] for tool in tools} == {"propose_calendar_event", "ask_calendar_details"}
-        call("propose_calendar_event", second_event.model_dump(mode="json"))
+        # The retry gets only the calendar tools, no MCP or connector tools.
+        assert kwargs["include_goal_tools"] is False
+        assert set(tools) == {"propose_calendar_event", "ask_calendar_details"}
+        assert "No valid draft has been saved" in kwargs["extra_instructions"]
+        await tools["propose_calendar_event"].call(second_event.model_dump(mode="json"))
         return "Review the second event."
 
-    model.respond_with_tools.side_effect = respond
-    chat = ChatService(None, embeddings, documents, model, calendar=service)
+    runtime = FakeRuntime(script)
     messages = [{"role": "user", "content": "Add a study session tomorrow from 4 to 5 PM."}]
-    first = chat.chat(ChatRequest(messages=messages), user_id=USER)
+    first = chat(runtime, service, messages)
     old = first.calendar_proposals[0]
     service.repository.rows[old.id]["status"] = "applied"
     messages += [{"role": "assistant", "content": first.response}, {"role": "user", "content": "another at 8pm to 9:30pm"}]
-    second = chat.chat(ChatRequest(messages=messages), user_id=USER)
+    second = chat(runtime, service, messages)
     assert len(second.calendar_proposals) == 1
     new = second.calendar_proposals[0]
     assert new.id != old.id
@@ -357,64 +345,90 @@ def test_followup_recovers_missing_draft_call_and_returns_a_new_approval_card(se
     service.request.assert_not_called()
 
 
+def test_repeated_tool_calls_cannot_create_multiple_cards_for_one_confirmation(service):
+    event = draft()
+
+    async def script(number, kwargs, tools):
+        propose = tools["propose_calendar_event"]
+        first = await propose.call(event.model_dump(mode="json"))
+        duplicate = await propose.call(event.model_dump(mode="json"))
+        assert str(next(iter(service.repository.rows))) in first
+        assert "already has a review card" in duplicate
+        other = event.model_copy(update={"start": event.start + timedelta(hours=4), "end": event.end + timedelta(hours=4)})
+        with pytest.raises(ToolError, match="already created"):
+            await propose.call(other.model_dump(mode="json"))
+        return "I've prepared new calendar proposals."
+
+    result = chat(FakeRuntime(script), service, "yes")
+    assert len(result.calendar_proposals) == len(service.repository.rows) == 1
+    assert "a new calendar proposal" in result.response
+    service.request.assert_not_called()
+
+
+def test_parallel_draft_calls_still_create_only_one_card(service):
+    event = draft()
+
+    async def script(number, kwargs, tools):
+        propose = tools["propose_calendar_event"]
+        other = event.model_copy(update={"start": event.start + timedelta(hours=4), "end": event.end + timedelta(hours=4)})
+        results = await asyncio.gather(propose.call(event.model_dump(mode="json")),
+                                       propose.call(other.model_dump(mode="json")), return_exceptions=True)
+        assert sum(isinstance(result, ToolError) for result in results) == 1
+        return "Review the event."
+
+    result = chat(FakeRuntime(script), service)
+    assert len(result.calendar_proposals) == len(service.repository.rows) == 1
+
+
 @pytest.mark.parametrize("request_text", ["a skating event at 3pm to 3.20pm also", "a skating event at 3:00 PM–3:20 PM also"])
 def test_old_event_times_are_rejected_before_saving_and_corrected_in_same_turn(service, request_text):
-    model, documents = MagicMock(), MagicMock()
-    documents.search.return_value = []
     base = draft().start.replace(hour=8, minute=0)
     old = draft().model_copy(update={"title": "Skateboarding", "start": base, "end": base + timedelta(minutes=15)})
     corrected = old.model_copy(update={"title": "Skating", "start": base.replace(hour=15), "end": base.replace(hour=15, minute=20)})
 
-    def respond(messages, prompt, tools, call):
-        with pytest.raises(AppError, match="latest user message"):
-            call("propose_calendar_event", old.model_dump(mode="json"))
+    async def script(number, kwargs, tools):
+        with pytest.raises(ToolError, match="latest user message"):
+            await tools["propose_calendar_event"].call(old.model_dump(mode="json"))
         assert service.repository.rows == {}
-        call("propose_calendar_event", corrected.model_dump(mode="json"))
+        await tools["propose_calendar_event"].call(corrected.model_dump(mode="json"))
         return "Review the skating event."
 
-    model.respond_with_tools.side_effect = respond
-    result = ChatService(None, MagicMock(), documents, model, calendar=service).chat(
-        ChatRequest(messages=[{"role": "user", "content": "Skateboarding tomorrow at 8am to 8.15am"},
-                              {"role": "assistant", "content": "Review the event below."},
-                              {"role": "user", "content": request_text}]), user_id=USER,
-    )
+    runtime = FakeRuntime(script)
+    result = chat(runtime, service, [{"role": "user", "content": "Skateboarding tomorrow at 8am to 8.15am"},
+                                     {"role": "assistant", "content": "Review the event below."},
+                                     {"role": "user", "content": request_text}])
     assert len(result.calendar_proposals) == len(service.repository.rows) == 1
     assert result.calendar_proposals[0].event == corrected
+    assert "Skating" in result.response and "03:20 PM" in result.response
+    assert len(runtime.calls) == 1  # corrected in the same turn, no retry
     service.request.assert_not_called()
 
 
 def test_repeated_wrong_times_cannot_be_claimed_as_a_successful_new_draft(service):
-    model, documents = MagicMock(), MagicMock()
-    documents.search.return_value = []
     base = draft().start.replace(hour=8, minute=0)
     old = draft().model_copy(update={"start": base, "end": base + timedelta(minutes=15)})
 
-    def respond(messages, prompt, tools, call, **kwargs):
-        with pytest.raises(AppError):
-            call("propose_calendar_event", old.model_dump(mode="json"))
+    async def script(number, kwargs, tools):
+        with pytest.raises(ToolError):
+            await tools["propose_calendar_event"].call(old.model_dump(mode="json"))
         return "All done."
 
-    model.respond_with_tools.side_effect = respond
-    result = ChatService(None, MagicMock(), documents, model, calendar=service).chat(
-        ChatRequest(messages=[{"role": "user", "content": "skating at 3pm to 3.20pm"}]), user_id=USER,
-    )
+    runtime = FakeRuntime(script)
+    result = chat(runtime, service, "skating at 3pm to 3.20pm")
     assert "couldn't prepare" in result.response
     assert result.calendar_proposals == [] and service.repository.rows == {}
-    assert model.respond_with_tools.call_count == 2
+    assert len(runtime.calls) == 2  # the rejection triggers the one retry
     service.request.assert_not_called()
 
 
 def test_recovery_asks_for_missing_details_instead_of_inventing_a_draft(service):
-    model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
-    documents.search.return_value = []
-    def respond(messages, prompt, tools, call, **kwargs):
-        if not kwargs:
+    async def script(number, kwargs, tools):
+        if number == 1:
             return "I've created a calendar proposal."
-        call("ask_calendar_details", {"question": "What start and end times should I use?"})
+        await tools["ask_calendar_details"].call({"question": "What start and end times should I use?"})
         return "I've drafted an event."
-    model.respond_with_tools.side_effect = respond
-    chat = ChatService(None, embeddings, documents, model, calendar=service)
-    result = chat.chat(ChatRequest(messages=[{"role": "user", "content": "another study session"}]), user_id=USER)
+
+    result = chat(FakeRuntime(script), service, "another study session")
     assert result.response == "What start and end times should I use?"
     assert result.calendar_proposals == []
     assert service.repository.rows == {}
@@ -422,14 +436,14 @@ def test_recovery_asks_for_missing_details_instead_of_inventing_a_draft(service)
 
 
 def test_no_new_card_is_claimed_if_the_recovery_still_creates_nothing(service):
-    model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
-    documents.search.return_value = []
-    model.respond_with_tools.return_value = "I've drafted a second calendar event."
-    result = ChatService(None, embeddings, documents, model, calendar=service).chat(
-        ChatRequest(messages=[{"role": "user", "content": "another at 8pm"}]), user_id=USER,
-    )
+    async def script(number, kwargs, tools):
+        return "I've drafted a second calendar event."
+
+    runtime = FakeRuntime(script)
+    result = chat(runtime, service, "another at 8pm")
     assert "couldn't prepare a new review card" in result.response
     assert result.calendar_proposals == []
+    assert len(runtime.calls) == 2  # one retry only
     service.request.assert_not_called()
 
 
