@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiRequest, connectProvider, getConnectors } from "./api";
-import type { CalendarStatus, ConnectorProvider, ConnectorStatus } from "./api";
+import type { CalendarStatus, ConnectorProvider, ConnectorStatus, RemoteLogin } from "./api";
 import { readSettings } from "./settings";
 
 export type State = ConnectorStatus["state"];
@@ -23,6 +23,7 @@ export function useSources(selected: ConnectorProvider[], onChange: (providers: 
   const [calendar, setCalendarState] = useState<CalendarStatus | null>(null);
   const [error, setError] = useState(() => new URLSearchParams(window.location.search).get("calendar_error") || "");
   const [busy, setBusy] = useState<string[]>([]);
+  const [remote, setRemote] = useState<{ provider: ConnectorProvider; login: RemoteLogin } | null>(null);
   const previousConnected = useRef(new Set<ConnectorProvider>());
 
   useEffect(() => {
@@ -78,12 +79,24 @@ export function useSources(selected: ConnectorProvider[], onChange: (providers: 
   };
 
   return {
-    connectors, engage, calendar, error, busy,
+    connectors, engage, calendar, error, busy, remote,
+    finishRemote: () => remote && run(remote.provider, async () => {
+      await apiRequest(`/integrations/${remote.provider}/finish`, { login_id: remote.login.login_id });
+      setRemote(null); setConnectors(await getConnectors());
+    }),
+    cancelRemote: () => remote && run(remote.provider, async () => {
+      await apiRequest(`/integrations/${remote.provider}/cancel`, { login_id: remote.login.login_id });
+      setRemote(null); setConnectors(await getConnectors());
+    }),
     stateOf: (provider: ConnectorProvider): State =>
       connectors?.find((item) => item.provider === provider)?.state ?? "not_configured",
     messageOf: (provider: ConnectorProvider) => connectors?.find((item) => item.provider === provider)?.message ?? null,
     connect: (provider: ConnectorProvider, action: "connect" | "verify") => run(provider, async () => {
-      await connectProvider(provider, action);
+      const pending = connectors?.find(item => item.provider === provider)?.state === "connecting";
+      const login = pending && action === "connect"
+        ? await apiRequest<RemoteLogin>(`/integrations/${provider}/login`)
+        : await connectProvider(provider, action);
+      if (login?.live_url) setRemote({ provider, login });
       setConnectors(await getConnectors());
     }),
     setEngage: (link: boolean) => run("engagesc", async () => {

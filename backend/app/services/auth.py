@@ -45,6 +45,10 @@ class AuthService:
     def __init__(self, database: Database):
         self.database = database
 
+    def usc_sign_in(self, whoami, old_token=None):
+        profile = self.find_or_create_usc_account(whoami)
+        return profile, self.start_session(profile.id, old_token)
+
     def _new_session(self, cursor, user_id: str, old_token: str | None) -> str:
         if old_token:
             cursor.execute("DELETE FROM public.account_sessions WHERE token_hash = %s", (token_hash(old_token),))

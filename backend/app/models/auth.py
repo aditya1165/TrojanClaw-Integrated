@@ -20,13 +20,20 @@ class UscLoginStartRequest(BaseModel):
 
 class UscLoginStart(BaseModel):
     attempt_id: str
+    live_url: str | None = None
+    phase: Literal["brightspace", "handshake"] = "brightspace"
 
 
 class UscLoginPoll(BaseModel):
     attempt_id: str = Field(min_length=1, max_length=64)
+    skip_handshake: bool = False
 
 
 class UscLoginStatus(BaseModel):
-    status: Literal["waiting", "failed", "done"]
+    status: Literal["waiting", "connecting", "interaction_required", "failed", "done"]
     detail: str | None = None
     account: AccountProfile | None = None
+    live_url: str | None = None
+    phase: Literal["brightspace", "handshake"] | None = None
+    connectors: list[dict] = Field(default_factory=list)
+    whoami: dict | None = Field(default=None, exclude=True)

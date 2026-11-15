@@ -6,10 +6,12 @@ to connect Brightspace, Handshake and WebReg and to find the student's account."
 from collections import OrderedDict, deque
 from threading import Lock
 from time import monotonic
+from hashlib import sha256
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.config import get_settings
+from app.database import get_database
 from app.models.auth import AccountProfile
 from app.services.auth import AuthService, COOKIE_NAME, SESSION_SECONDS, get_auth_service
 
@@ -19,12 +21,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def require_trusted_origin(request: Request) -> None:
     origin = request.headers.get("origin")
-    if origin and origin not in get_settings().cors_origins:
+    settings = get_settings()
+    if origin and origin not in settings.cors_origins:
         raise HTTPException(403, "Request origin is not allowed.")
+    if (not origin and getattr(settings, "app_env", "development") in {"production", "staging"}
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not request.headers.get("authorization", "").startswith("Bearer ")):
+        raise HTTPException(403, "A trusted request origin is required.")
 
 
 class AuthRateLimiter:
-    """Bound memory and password-hashing work. Apply per worker and client IP."""
+    """Bound authentication work; use an atomic shared counter when hosted."""
 
     def __init__(self):
         self.attempts: OrderedDict[str, deque[float]] = OrderedDict()
@@ -36,6 +43,21 @@ class AuthRateLimiter:
 
     def check_key(self, key: str) -> None:
         """Apply the same bounded limiter to an authenticated account when needed."""
+        if get_settings().app_env in {"production", "staging"}:
+            with get_database().connection() as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO public.auth_rate_limits (client_hash, attempts) VALUES (%s, 1) "
+                    "ON CONFLICT (client_hash) DO UPDATE SET "
+                    "attempts = CASE WHEN auth_rate_limits.window_started_at <= now() - interval '5 minutes' "
+                    "THEN 1 ELSE auth_rate_limits.attempts + 1 END, "
+                    "window_started_at = CASE WHEN auth_rate_limits.window_started_at <= now() - interval '5 minutes' "
+                    "THEN now() ELSE auth_rate_limits.window_started_at END RETURNING attempts",
+                    (sha256(key.encode()).hexdigest(),),
+                )
+                attempts = cursor.fetchone()[0]
+            if attempts > 20:
+                raise HTTPException(429, "Too many attempts. Try again in five minutes.", headers={"Retry-After": "300"})
+            return
         now = monotonic()
         with self.lock:
             attempts = self.attempts.setdefault(key, deque())

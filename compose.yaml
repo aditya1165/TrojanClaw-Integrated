@@ -1,0 +1,61 @@
+services:
+  api:
+    build:
+      context: .
+      target: api
+    env_file: deploy/.env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=512m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks:
+      app:
+        ipv4_address: 172.30.0.20
+    healthcheck:
+      test: ["CMD", "/opt/backend/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthcheck')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks:
+      app:
+        ipv4_address: 172.30.0.10
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN to the public DNS hostname}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      app:
+        ipv4_address: 172.30.0.30
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+networks:
+  app:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+volumes:
+  caddy_data:
+  caddy_config:

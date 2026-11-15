@@ -44,7 +44,7 @@ def start(request: Request, response: Response):
     else:
         token, url = google_signin.start(request.cookies.get(GOOGLE_ATTEMPT_COOKIE))
     response.set_cookie(GOOGLE_ATTEMPT_COOKIE, token, max_age=1200, httponly=True,
-                        secure=get_settings().app_env not in {"development", "test"}, samesite="lax", path="/auth/google")
+                        secure=get_settings().app_env not in {"development", "test"}, samesite="lax", path="/")
     response.headers["Cache-Control"] = "no-store"
     return CalendarConnect(url=url)
 
@@ -69,7 +69,7 @@ def finish(request: Request, response: Response, payload: UscLoginStartRequest |
     response.headers["Cache-Control"] = "no-store"
     position = (payload.left, payload.top) if payload and payload.left is not None and payload.top is not None else None
     attempt_id = google_signin.begin_usc(request.cookies.get(GOOGLE_ATTEMPT_COOKIE), position)
-    return UscLoginStart(attempt_id=attempt_id)
+    return UscLoginStart(**attempt_id) if isinstance(attempt_id, dict) else UscLoginStart(attempt_id=attempt_id)
 
 
 @router.post("/status", response_model=UscLoginStatus,
@@ -77,10 +77,11 @@ def finish(request: Request, response: Response, payload: UscLoginStartRequest |
 def status(request: Request, response: Response, payload: UscLoginPoll,
            auth: AuthService = Depends(get_auth_service), calendar: GoogleCalendar = Depends(get_calendar_service)):
     response.headers["Cache-Control"] = "no-store"
-    usc, tokens = google_signin.poll(request.cookies.get(GOOGLE_ATTEMPT_COOKIE), payload.attempt_id)
-    if usc.status == "waiting":
-        return UscLoginStatus(status="waiting")
+    usc, tokens = google_signin.poll(request.cookies.get(GOOGLE_ATTEMPT_COOKIE), payload.attempt_id, payload.skip_handshake)
+    if usc.status not in {"failed", "done"}:
+        return UscLoginStatus.model_validate(usc, from_attributes=True)
     response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/auth/google")
+    response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/")
     if usc.status == "failed":
         return UscLoginStatus(status="failed", detail=usc.detail or "The USC connection did not finish. Please retry using your USC account.")
     profile = usc.account
@@ -102,4 +103,5 @@ def status(request: Request, response: Response, payload: UscLoginPoll,
 def cancel(request: Request, response: Response):
     google_signin.cancel(request.cookies.get(GOOGLE_ATTEMPT_COOKIE))
     response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/auth/google")
+    response.delete_cookie(GOOGLE_ATTEMPT_COOKIE, path="/")
     response.headers["Cache-Control"] = "no-store"

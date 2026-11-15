@@ -47,7 +47,7 @@ def test_public_frontend_is_not_rejected_for_its_forwarded_visitor_ip(monkeypatc
 
 def test_google_start_accepts_the_configured_tunnel_without_opening_usc(monkeypatch):
     public = "https://tunnel.example"
-    settings = SimpleNamespace(cors_origins=[public], mcp_public_url=public)
+    settings = SimpleNamespace(cors_origins=[public], mcp_public_url=public, app_env="test")
     monkeypatch.setattr("app.api.routes.integrations.get_settings", lambda: settings)
     monkeypatch.setattr("app.api.routes.auth.get_settings", lambda: settings)
     monkeypatch.setattr("app.api.routes.google_auth.google_signin.start", lambda _: ("test-attempt", "https://accounts.google.com/test"))

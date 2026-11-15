@@ -1,0 +1,8 @@
+{
+  "name": "trojanclaw-brightspace-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "brightspace-mcp-server": "5.2.3"
+  }
+}

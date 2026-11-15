@@ -19,6 +19,7 @@ class IntegrationState(str, Enum):
     connected = "connected"
     needs_login = "needs_login"
     unavailable = "unavailable"
+    revoking = "revoking"
 
 
 class IntegrationStatus(BaseModel):

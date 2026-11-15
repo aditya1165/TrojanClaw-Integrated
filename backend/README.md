@@ -2,6 +2,10 @@
 
 This is the Python backend for **TrojanClaw**, built with **FastAPI** and configured to use **Supabase**.
 
+Connector authentication defaults to Browserbase managed Chromium. Google-first
+onboarding and the current Sources UI use per-account encrypted database sessions.
+See [the remote-browser guide](../docs/remote-browser.md) for setup and data flow.
+
 Google-first USC onboarding and Google Calendar MCP setup, including the two
 OAuth callback URIs and mandatory event approval, are documented in
 [Google Calendar setup](../docs/google-calendar.md).

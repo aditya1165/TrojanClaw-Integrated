@@ -26,7 +26,7 @@ Then just ask: *what's due, what's next, what fits your week.*
 
 | | |
 | :--- | :--- |
-| 🔐 **One sign-in** | **Continue with Google** with your @usc.edu account, then one USC login (NetID + Duo) in a small window. TrojanClaw connects Google Calendar, Brightspace, Handshake and your WebReg course bin, and the window closes by itself. |
+| 🔐 **One sign-in** | **Continue with Google** with your @usc.edu account, then one USC login (NetID + Duo) in a private remote browser. TrojanClaw connects Google Calendar, Brightspace, Handshake and your WebReg course bin. |
 | 💬 **Chat that checks for you** | Replies stream in word by word, with a live status line ("Checking Brightspace: upcoming due dates") and the sources each answer used. |
 | 🃏 **Answers as cards** | Jobs, events, deadlines, courses and posts come back as tidy cards with an **Open** button to the real page in Handshake, Brightspace, Piazza or EngageSC. Every link comes from a tool result, never made up. |
 | 🗂️ **Saved chats** | Every chat has its own link, an AI-written title, and can be searched, pinned, renamed or deleted. |
@@ -60,7 +60,7 @@ flowchart LR
 2. **The agent decides** which tools it needs: your synced course data, a live connector, your calendar, WebReg, or public USC information.
 3. **The reply streams back** with what it checked, lists shown as linked cards, and where each fact came from. Your chat is saved for next time.
 
-Connector logins run in a real Chrome window on **your** computer, and each TrojanClaw account keeps its own sessions.
+Connector logins run in private Browserbase Chromium sessions, and each TrojanClaw account keeps its own encrypted sessions.
 
 > [!TIP]
 > The agent runs on **Claude Sonnet 5.5** at low effort, with prompt caching so earlier turns are re-read at the cache price. Change the model, effort or tool rounds in [`config/agent.yaml`](config/agent.yaml); `claude-haiku-5-5` is cheaper still.
@@ -76,7 +76,7 @@ Connector logins run in a real Chrome window on **your** computer, and each Troj
 | [Python](https://www.python.org/downloads/) | 3.11 | Backend |
 | [uv](https://docs.astral.sh/uv/getting-started/installation/) | latest | Connector helpers (installs Python 3.12 for them) |
 | [Node.js](https://nodejs.org/) | 22.12+ | Frontend and Google Calendar |
-| [Google Chrome](https://www.google.com/chrome/) | latest | The USC login popup and connector logins |
+| Browserbase project | persistent contexts | Private managed Chromium for USC and connector sign-in |
 
 ### 1 · Set up the backend
 
@@ -113,7 +113,7 @@ Then fill in `backend/.env` (see [Configuration](#-configuration)) and apply eve
 ```sh
 uv sync --locked --project integrations/handshake
 uv sync --locked --project integrations/piazza --python 3.12
-uv run --locked --project integrations/handshake patchright install chromium
+npm ci --prefix integrations/brightspace
 npm ci --prefix integrations/google-calendar
 ```
 
@@ -130,6 +130,11 @@ npm run dev
 ```
 
 Open **http://127.0.0.1:5173**, click **Get started**, then **Continue with Google**. 🎉
+
+USC and connector logins open in an embedded Browserbase browser. Set
+`CONNECTOR_MODE=browserbase`, `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and
+`CONNECTOR_ENCRYPTION_KEYS` in `backend/.env`. See [the connector guide](CONNECTORS.md)
+for encrypted storage, migrations, and desktop development mode.
 
 > [!IMPORTANT]
 > Always use **`127.0.0.1`**, not `localhost`. The browser keeps sign-in cookies per host, and mixing the two breaks sign-in.
@@ -194,7 +199,7 @@ TrojanClaw_v2/
 | :--- | :--- |
 | "This Google sign-in expired" | You mixed `localhost` and `127.0.0.1`. Open the app at `http://127.0.0.1:5173`. |
 | The **Continue with Google** button is greyed out | Google sign-in isn't set up: fill in the `GOOGLE_CALENDAR_*` settings in `backend/.env`. |
-| "One more step: your USC login" keeps waiting | The small USC window may be behind your browser (check the Dock or ⌘Tab). If it's stuck, the backend terminal's `USC login:` / `USC setup:` lines show which step. |
+| "One more step: your USC login" keeps waiting | Complete Duo in the embedded remote browser. For Handshake verification, finish the challenge or choose Skip Handshake. Check the backend Browserbase settings if no view opens. |
 | "Install the local connectors first" | Run the `uv sync` lines in step 2. |
 | "Install the Google Calendar connector dependencies first" | Run `npm ci --prefix integrations/google-calendar`. |
 | "File uploads need SUPABASE_SECRET_KEY" | Add the secret key (Supabase → Project Settings → API Keys) to `backend/.env`. |

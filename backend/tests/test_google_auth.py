@@ -114,6 +114,62 @@ def test_combined_flow_encrypts_tokens_and_starts_brightspace_once(setup):
     calendar.complete_connection.assert_not_called()
 
 
+def test_browserbase_google_onboarding_keeps_cookie_progress_and_calendar(setup, monkeypatch):
+    from uuid import uuid4
+    flow, calendar, desktop = setup
+    remote = MagicMock()
+    attempt_id = str(uuid4())
+    remote.start.return_value = {"attempt_id": attempt_id, "live_url": "https://www.browserbase.com/live/test", "phase": "brightspace"}
+    profile = AccountProfile(id=UUID(int=2), name="Tommy Trojan", username="ttrojan")
+    remote.finish.side_effect = [
+        ({"status": "connecting", "phase": "handshake", "detail": "Connecting sources"}, None),
+        ({"status": "done", "account": profile, "whoami": WHOAMI}, None),
+    ]
+    monkeypatch.setattr(flow, "managed", lambda: True)
+    monkeypatch.setattr("app.services.hosted_usc.get_usc_login", lambda: remote)
+    monkeypatch.setattr(routes, "google_signin", flow)
+    auth = MagicMock()
+    auth.start_session.return_value = "final-app-session"
+    monkeypatch.setitem(app.dependency_overrides, get_auth_service, lambda: auth)
+    monkeypatch.setitem(app.dependency_overrides, get_calendar_service, lambda: calendar)
+    with TestClient(app) as client:
+        start = client.post("/auth/google/start", json={})
+        assert "Path=/;" in start.headers["set-cookie"]
+        state = parse_qs(urlparse(start.json()["url"]).query)["state"][0]
+        client.get("/auth/google/callback", params={"state": state, "code": "test-code"}, follow_redirects=False)
+        opened = client.post("/auth/google/finish", json={})
+        assert opened.json()["live_url"] == remote.start.return_value["live_url"]
+        remote.start.assert_called_once_with(client.cookies.get(GOOGLE_ATTEMPT_COOKIE), expected_email=EMAIL)
+        assert client.post("/auth/google/finish", json={}).json() == opened.json()
+        pending = client.post("/auth/google/status", json={"attempt_id": attempt_id})
+        assert pending.json()["status"] == "connecting"
+        auth.start_session.assert_not_called()
+        done = client.post("/auth/google/status", json={"attempt_id": attempt_id, "skip_handshake": True})
+        assert done.json()["status"] == "done" and "whoami" not in done.json()
+        assert client.cookies.get(COOKIE_NAME) == "final-app-session"
+        calendar.complete_connection.assert_called_once_with(profile.id, TOKENS)
+        assert all(call.kwargs["issue_session"] is False for call in remote.finish.call_args_list)
+        assert remote.finish.call_args.args[4] is True
+        assert client.post("/auth/google/status", json={"attempt_id": attempt_id}).status_code == 400
+    desktop.start.assert_not_called()
+
+
+def test_cancelling_browserbase_google_attempt_releases_only_its_browser(setup, monkeypatch):
+    from uuid import uuid4
+    flow, _, _ = setup
+    remote = MagicMock()
+    remote.start.return_value = {"attempt_id": str(uuid4()), "live_url": "https://www.browserbase.com/live/test"}
+    monkeypatch.setattr(flow, "managed", lambda: True)
+    monkeypatch.setattr("app.services.hosted_usc.get_usc_login", lambda: remote)
+    token, _, state = begin(flow)
+    flow.callback(token, state, "code")
+    flow.begin_usc(token)
+    flow.cancel(token)
+    remote.cancel_current.assert_called_once_with(token)
+    with pytest.raises(AppError, match="expired"):
+        flow.begin_usc(token)
+
+
 def test_oauth_state_cookie_and_replay_are_checked_before_exchange(setup):
     flow, calendar, usc = setup
     token, url, state = begin(flow)

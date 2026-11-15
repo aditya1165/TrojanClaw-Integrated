@@ -1,20 +1,22 @@
-"""Local Google-first onboarding followed by a verified USC connector login.
+"""Google-first onboarding followed by a verified USC connector login.
 
-Google OAuth runs in the user's ordinary browser. The existing USC helper then
-establishes Brightspace's session; Google cookies are never inspected or copied.
-Like UscLogin, pending attempts are short-lived and belong to this local worker.
+Google OAuth runs in the user's ordinary browser. USC uses managed Chromium by
+default; Google cookies are never inspected or copied. Pending Google attempts
+remain short-lived and process-local; use one API worker/instance for onboarding.
 """
 
 from dataclasses import dataclass, field
 import hmac
 import secrets
-from threading import RLock
+from threading import Lock, RLock
 import time
 
 from app.errors import AppError
 from app.services.auth import token_hash
 from app.services.calendar import get_calendar_service
 from app.services.usc_auth import usc_login, verify_brightspace_identity
+from app.config import get_settings
+from app.models.auth import UscLoginStatus
 
 
 GOOGLE_ATTEMPT_COOKIE = "trojanclaw_google_signin"
@@ -33,6 +35,8 @@ class GoogleAttempt:
     detail: str | None = None
     redirect_uri: str | None = None
     frontend_url: str | None = None
+    remote_login: dict | None = None
+    operation_lock: object = field(default_factory=Lock, repr=False)
 
 
 class GoogleSignIn:
@@ -40,6 +44,9 @@ class GoogleSignIn:
         self.calendar_factory, self.usc = calendar_factory, usc
         self.attempts = {}
         self.lock = RLock()
+
+    def managed(self):
+        return self.usc is usc_login and get_settings().connector_mode == "browserbase"
 
     def _get(self, token):
         if not token or len(token) > 128:
@@ -105,25 +112,41 @@ class GoogleSignIn:
     def begin_usc(self, token, position=None):
         with self.lock:
             attempt = self._get(token)
+        with attempt.operation_lock:
             if attempt.status == "failed":
                 raise AppError(attempt.detail, "google_signin_failed", 400)
             if attempt.status == "usc":
-                return attempt.usc_attempt_id
+                return attempt.remote_login or attempt.usc_attempt_id
             if attempt.status != "ready":
                 raise AppError("Finish Google sign-in before connecting Brightspace.", "google_signin_not_ready", 409)
-            attempt.usc_attempt_id = self.usc.start(position, expected_email=attempt.email)
+            if self.managed():
+                from app.services.hosted_usc import get_usc_login
+                attempt.remote_login = get_usc_login().start(token, expected_email=attempt.email)
+                attempt.usc_attempt_id = attempt.remote_login["attempt_id"]
+            else:
+                attempt.usc_attempt_id = self.usc.start(position, expected_email=attempt.email)
             attempt.status = "usc"
-            return attempt.usc_attempt_id
+            return attempt.remote_login or attempt.usc_attempt_id
 
-    def poll(self, token, attempt_id):
+    def poll(self, token, attempt_id, skip_handshake=False):
         with self.lock:
             attempt = self._get(token)
+        with attempt.operation_lock:
             if attempt.status != "usc" or not hmac.compare_digest(attempt.usc_attempt_id or "", attempt_id):
                 raise AppError("This sign-in attempt does not belong to this browser.", "google_signin_attempt", 403)
-            usc = self.usc.take(attempt_id)
-            if usc.status == "waiting":
+            if self.managed():
+                from app.services.hosted_usc import get_usc_login
+                from app.services.auth import get_auth_service
+                from uuid import UUID
+                result, _ = get_usc_login().finish(UUID(attempt_id), token, get_auth_service(), None,
+                    skip_handshake, issue_session=False)
+                usc = UscLoginStatus(**result)
+            else:
+                usc = self.usc.take(attempt_id)
+            if usc.status not in {"failed", "done"}:
                 return usc, None
-            self.attempts.pop(token_hash(token), None)
+            with self.lock:
+                self.attempts.pop(token_hash(token), None)
             if usc.status == "done":
                 # Repeat the identity check at the final account-linking boundary.
                 verify_brightspace_identity(usc.whoami or {}, attempt.email)
@@ -134,7 +157,15 @@ class GoogleSignIn:
     def cancel(self, token):
         if token:
             with self.lock:
-                self.attempts.pop(token_hash(token), None)
+                attempt = self.attempts.get(token_hash(token))
+            if attempt:
+                with attempt.operation_lock:
+                    if attempt.status == "usc" and self.managed():
+                        from app.services.hosted_usc import get_usc_login
+                        get_usc_login().cancel_current(token)
+                    with self.lock:
+                        self.attempts.pop(token_hash(token), None)
+                    attempt.status = "cancelled"
 
 
 google_signin = GoogleSignIn()

@@ -25,3 +25,15 @@
 @media (max-width: 640px) { .auth-dialog { padding: 32px 24px; } }
 
 
+.remote-signin { position: fixed; inset: 0; margin: auto; width: min(1200px, 96vw); height: min(900px, 94dvh); max-width: 96vw; max-height: 94dvh; padding: 20px; border: 1px solid var(--tc-line); border-radius: 18px; background: var(--tc-surface); color: var(--tc-fg); overflow: auto; }
+.remote-signin[open] { display: flex; flex-direction: column; gap: 12px; }
+.remote-signin::backdrop { background: #0009; }
+.remote-signin header, .remote-signin footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.remote-signin header > div, .remote-signin footer > span { flex: 1; }
+.remote-signin h2 { font-size: 22px; font-weight: 600; }
+.remote-signin p, .remote-signin footer { font-size: 13px; }
+.remote-signin iframe { flex: 1; min-height: 360px; width: 100%; border: 1px solid var(--tc-line); border-radius: 10px; background: white; }
+.remote-signin button { padding: 10px 15px; border: 1px solid var(--tc-line); border-radius: 10px; }
+.remote-signin:fullscreen { width: 100vw; height: 100dvh; max-width: none; max-height: none; border-radius: 0; }
+.remote-signin-progress { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; min-height: 360px; }
+.remote-signin iframe[hidden] { display: none; }
