@@ -11,7 +11,7 @@
 
 **TrojanClaw v2** is an AI academic copilot and autonomous time-blocking scheduler engineered specifically for USC students. It unifies academic obligations (**Brightspace** assignments, **Piazza** announcements) and campus life (**EngageSC** club events) into an intelligent timeline that automatically schedules dedicated study blocks directly into **Google Calendar**. A **Claude agent** does the reasoning: it decides which **MCP tools** to call (student data, free time, calendar, campus events) instead of following hard-coded pipelines.
 
-USC protects Brightspace with Shibboleth SSO and Duo 2FA, so TrojanClaw never stores or types a student's USC password. Instead, the student signs in **themselves**, in a real browser window opened by a small **TrojanClaw Sync Helper** running on their own computer. Read-only MCP servers (`brightspace-mcp-server` and `mcp-piazza`) then pull the student's Brightspace and Piazza data, and the helper uploads it to **Supabase `pgvector`** for semantic retrieval and long-term context storage.
+USC protects Brightspace with Shibboleth SSO and Duo 2FA, so TrojanClaw never stores or types a student's USC password. Instead, the student signs in **themselves**, on their own computer, through a small **TrojanClaw Sync Helper** (today with their Brightspace browser session and a Piazza login; later with Duo-approved automatic sign-in). Read-only MCP servers (`brightspace-mcp-server` and `mcp-piazza`) then pull the student's Brightspace and Piazza data, and the helper uploads it to **Supabase `pgvector`** for semantic retrieval and long-term context storage.
 
 ### Deployment Model: Multi-User, Hosted App + Local Sync Helper
 
@@ -20,11 +20,11 @@ TrojanClaw v2 is a **multi-user application**. Any USC student can sign in with 
 | Part | Runs on | Responsibilities |
 | :--- | :--- | :--- |
 | **Hosted app** | TrojanClaw server | React UI, FastAPI, Supabase, Google OAuth, the **TrojanClaw MCP server** (all of TrojanClaw's own capabilities as tools), the **agent runtime** (Claude + tools), server-side normalization of synced data, `.ics` fallback |
-| **Sync Helper** | Each student's computer | Opens the USC SSO / Duo and Piazza login windows, runs the third-party read-only MCP servers listed in the server's connector config, and uploads their raw results to that student's account |
+| **Sync Helper** | Each student's computer | Handles the Brightspace and Piazza sign-ins, runs the third-party read-only MCP servers listed in the server's connector config, and uploads their raw results to that student's account |
 
 * Every student is a row in `public.users`, created on first Google sign-in.
 * All ingested data (`student_context_items`, `item_embeddings`, `synced_calendar_events`) carries a `user_id`, and every query, vector search and calendar sync is scoped to the signed-in user.
-* **Why a local helper:** SSO + Duo login needs a visible browser window in front of the student, and a hosted server cannot open one on a student's laptop. Login sessions therefore stay on the student's machine. Only the results of allowlisted read-only tool calls (deadlines, announcements, posts) leave it.
+* **Why a local helper:** USC SSO + Duo sign-in needs the student present (browser session or phone approval), and the MCP servers' sessions are tied to that computer (`brightspace.md`, `piazza.md`). A hosted server cannot do this for a student. Login sessions therefore stay on the student's machine. Only the results of allowlisted read-only tool calls (deadlines, announcements, posts) leave it.
 * **MCP connector details** (read-only tool allowlist, blocked tools, `mcp-piazza` settings) follow `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md` §6 and §15. That plan's single-owner login is replaced here by per-student Google sign-in, and its server-side sync worker is replaced by the Sync Helper (§2.2).
 
 ### Design Principles: MCP-First, Agentic, Minimal Hardcoding
@@ -51,7 +51,7 @@ TrojanClaw v2 is a **multi-user application**. Any USC student can sign in with 
 ```mermaid
 flowchart TD
     subgraph Student_Machine["Student's Computer: TrojanClaw Sync Helper"]
-        Login["Visible Browser Login (USC SSO + Duo, Piazza)"]
+        Login["Sign-in on this computer (Brightspace cookie or Duo, Piazza login)"]
         BSMCP["brightspace-mcp-server (read-only)"]
         PZMCP["mcp-piazza (read-only)"]
         Runner["Config-Driven MCP Runner"]
@@ -121,11 +121,11 @@ flowchart TD
 
 ## 2. LOGIN & AUTHENTICATION SPECIFICATION
 
-Automated headless browser scripts (e.g. Playwright / Selenium) entering USC credentials will fail due to USC's Shibboleth SSO and Duo Mobile 2FA push notifications, and TrojanClaw should never hold a student's USC password in the first place. So the **student logs in themselves** in a visible browser window on their own computer, and TrojanClaw reads data through that session with read-only MCP servers. Three logins stay separate:
+Automated headless browser scripts (e.g. Playwright / Selenium) entering USC credentials will fail due to USC's Shibboleth SSO and Duo Mobile 2FA push notifications, and TrojanClaw should never hold a student's USC password in the first place. So the **student signs in themselves on their own computer**, and TrojanClaw reads data through that session with read-only MCP servers. Login secrets (cookies, passwords) are entered into hidden prompts on that computer and stay there. Three logins stay separate:
 
 1. **TrojanClaw account:** Google OAuth (§2.1).
-2. **USC Brightspace:** USC SSO + Duo in a visible browser opened by the Sync Helper (§2.2, §2.3).
-3. **Piazza:** Piazza login (including SSO) in a visible browser opened by the Sync Helper (§2.2, §2.4).
+2. **USC Brightspace:** today, the student's browser session cookie; later, automatic sign-in with Duo approval (§2.2, §2.3).
+3. **Piazza:** `mcp-piazza login`, by Piazza password, Chrome session or session cookie (§2.2, §2.4).
 
 ### 2.1 Google OAuth 2.0 (App Identity & Calendar Permissions)
 * **Strategy:** Use Google OAuth as the primary authentication provider.
@@ -145,9 +145,9 @@ The Sync Helper (`trojanclaw-sync`) is a small Python program the student runs o
    * In onboarding, the student clicks **"Connect this computer"**. The dashboard shows a short one-time pairing code (valid for 10 minutes).
    * The student runs `trojanclaw-sync pair <code>`. The helper exchanges the code for a per-device **sync token**, stored in the OS keychain. The backend stores only a hash of the token (`sync_devices`, §3.1), and the student can revoke the device from the dashboard.
 2. **Log in (first sync, and whenever a session expires):**
-   * The helper starts `brightspace-mcp-server` with a visible browser (`D2L_HEADLESS=false`). The student completes the **USC SSO + Duo** login in that window.
-   * The helper runs `mcp-piazza login --browser`. The student logs in to Piazza in that window (works for Google/SSO Piazza accounts, so no Piazza password is needed).
-   * Sessions are saved locally by each MCP server. The USC password and session cookies never reach TrojanClaw's servers or Claude.
+   * **Brightspace:** `trojanclaw-sync login brightspace` asks for the `d2lSessionVal` and `d2lSecureSessionVal` cookies from the student's logged-in browser at a hidden prompt, stores them in the OS keychain, and passes them to the server as `D2L_SESSION_COOKIE` at launch (§2.3). Once Duo sign-in works, the same command runs the server's `setup` instead.
+   * **Piazza:** `trojanclaw-sync login piazza` runs `mcp-piazza login` with the method the student picks (password, Chrome or cookie, §2.4); mcp-piazza saves its own session file.
+   * Cookies, passwords and session files stay on the student's computer. They never reach TrojanClaw's servers or Claude.
 3. **Pull and upload (config-driven):**
    * The helper has **no connector-specific code**. At the start of each sync it downloads the connector config from `GET /sync/config` (§5.11): which MCP servers to start (command, pinned version, env), which read-only tools are allowed, and a **sync recipe** per connector (which tools to call, in what order, with what arguments).
    * It runs the recipe, refusing any tool not on the allowlist, and uploads the **raw JSON results** with `POST /sync/upload` and its sync token.
@@ -156,24 +156,54 @@ The Sync Helper (`trojanclaw-sync`) is a small Python program the student runs o
 4. **Triggers:**
    * **"Sync now"** in the dashboard queues a row in `sync_jobs`. The running helper polls `GET /sync/jobs/next` every ~30 seconds and picks it up.
    * While the helper is running, it also syncs on a schedule (default every 2 hours).
-   * If a USC or Piazza session has expired, the helper reopens the login window and the dashboard shows **"Re-login needed"** with the time of the last good sync.
+   * **Live lookups:** while the helper is running it also answers on-demand questions from the agent, such as reading an assignment handout (`get_assignment_files`), a lecture transcript, or searching Piazza for an earlier question (`search_posts`). The agent's `live_lookup` tool (§5.9) queues the request, the helper long-polls `GET /sync/live/next`, runs the allowlisted call and returns the result. Results are shown to the agent for that answer and are not stored. If the helper is offline, the tool says so and the agent answers from synced data.
+   * If a USC or Piazza session has expired (for Brightspace, the server reports that `D2L_SESSION_COOKIE` has expired), the job ends as `needs_login`, the helper prompts for a fresh sign-in, and the dashboard shows **"Re-login needed"** with the time of the last good sync.
 
 ### 2.3 Brightspace via `brightspace-mcp-server`
 
-* npm package `brightspace-mcp-server` (MIT, Node >= 22), run over stdio. **Pin an exact version**: it releases very often.
-* There is no USC preset. Use the generic SSO path with Duo options (`D2L_HEADLESS=false`, `D2L_DUO_PASSCODE` if needed).
-* Tool results are JSON inside text blocks plus extra "update notice" blocks. The helper keeps the JSON blocks and discards the notices.
-* **Read-only allowlist** (in `config/connectors/brightspace.yaml`, not in code): courses, assignments and due dates, quizzes, calendar events, announcements/news, content module listings (see the MCP plan §6).
-* **Blocked:** `get-classlist-emails` and `get-roster` (classmates' personal data), all `download-*` tools (they write files), `sign-in`, `sign-out`, `mfa-relay`, and the server's HTTP mode.
-* **Gate before building on it:** USC SSO + Duo through this server is unproven (MCP plan §15.3). Before the connector work starts, run its `setup` once against USC and record whether login succeeds, which Duo method works, and how long the session lasts. If it fails, the `.ics` fallback (§2.5) still covers deadlines.
+Prototype notes: `brightspace.md` (verified 2026-11-14).
+
+* **Server:** [`RohanMuppa/brightspace-mcp-server`](https://github.com/RohanMuppa/brightspace-mcp-server), npm, MIT, Node >= 22, run over stdio against `https://brightspace.usc.edu`. 29 tools, none of which submit, edit or delete anything. It releases very often (about 250 releases), so it is **pinned to `5.2.3`**.
+* **Run command:** `npx -y brightspace-mcp-server@5.2.3` with `D2L_NO_UPDATE_CHECK=1`, which turns off the extra "update notice" text blocks. Tool results are JSON inside text blocks; any other text is ignored.
+* **Sign-in, current (verified):** **browser session cookie.** The student logs in to Brightspace in their normal browser and the helper takes the two cookies `d2lSessionVal` and `d2lSecureSessionVal` through a hidden prompt (never a command-line argument, chat message or commit). The helper stores them in the OS keychain and starts the server with `D2L_SESSION_COOKIE="d2lSessionVal=…; d2lSecureSessionVal=…"`, which skips the server's own browser login. When the server reports that `D2L_SESSION_COOKIE` has expired, the sync job reports `needs_login` and the student repeats the cookie step. Logging out of Brightspace in the browser kills these cookies.
+* **Sign-in, planned (blocked on Duo):** `npx -y brightspace-mcp-server@5.2.3 setup` stores the USC password in the macOS Keychain and asks for Duo or Microsoft approval on the phone. A teammate is working on it; the session lifetime is still unknown.
+* **Read-only allowlist** (in `config/connectors/brightspace.yaml`, §5.11). ✅ = returned real data for CSCI 599 / CSCI 566 on 2026-11-14:
+
+  | Group | Allowed tools |
+  | :--- | :--- |
+  | Deadlines & schedule | `get_upcoming_due_dates` ✅, `get_calendar_events` ✅ |
+  | Assignments & grades | `get_assignments` ✅, `get_my_grades` ✅, `get_assignment_rubric`, `get_dropbox_feedback` (omit `entityType`/`entityId`), `get_assignment_files` |
+  | Course material | `get_announcements` ✅, `get_announcement_files`, `get_syllabus` ✅, `get_course_content` ✅, `get_video_transcript`, `search_course` ✅, `get_discussions` ✅ |
+  | Courses & groups | `get_my_courses` ✅, `get_my_groups` ✅, `get_available_groups`, `get_roster` (**only without `includeStudents`**, which returns instructor and TA contacts) |
+
+* **Blocked:** `get_classlist_emails` and `get_roster` with `includeStudents` (classmates' personal data); `download_file`, `download_course_files`, `download_dropbox_submission_file` (write files to disk); `get_dropbox_folders`, `get_dropbox_submissions`, `get_dropbox_user_submissions`, `get_rubrics_for_object` (instructor/TA tools, nothing useful for a student); `sign_in`, `sign_out`, `get_server_info` (session management stays outside the app). The allowlist supports argument rules, so `get_roster` is allowed only with `includeStudents` absent or false (§5.8).
+* **Coverage varies by course.** Some instructors use Brightspace heavily and others barely use it: CSCI 599 has assignments, grades, announcements and a syllabus, while CSCI 566 has only content and a weekly schedule. The normalizer must accept empty results, and the dashboard should show what each course actually provides instead of implying nothing is due.
+* **Grades and feedback** are readable (`get_my_grades`, `get_dropbox_feedback`, `get_assignment_rubric`), which enables questions like "What's my grade in CSCI 599 so far?". Whether grades are synced to the hosted database or only read live is an open decision (§6.2), because grades are sensitive student records.
+* **Gate 1 status:** cookie sign-in ✅ and the main read tools ✅. Still open: automatic sign-in with Duo, cookie and session lifetime, and recording each tool's output fields into the connector mappings. Not yet wired into the backend.
 
 ### 2.4 Piazza via `mcp-piazza`
 
-* Source: `github.com/jadenpxrk/mcp-piazza`, run with `uvx mcp-piazza` over stdio. Read-only, returns structured output.
-* SSO-friendly login with `login --browser` (or `--cookie`), so no Piazza password is stored.
-* Always run with **`PIAZZA_KEEP_UNREAD=true`**, because `get_post` otherwise marks posts as read on the student's account.
-* Its allowlist, environment and sync recipe (list the student's classes, then fetch posts changed since the last sync cursor for each class) live in `config/connectors/piazza.yaml` (§5.11). No course IDs are configured anywhere.
-* It is built on the unofficial `piazza-api` and can break without notice. The demo dataset (§2.5) is the safety net for judging.
+Prototype notes: `piazza.md` (verified 2026-11-14).
+
+* **Server:** [`jadenpxrk/mcp-piazza`](https://github.com/jadenpxrk/mcp-piazza), community project, read-only (cannot post, reply, edit, like or delete), stdio, structured output, 12 tools. It is **v0.1.0** (released October 2026, single maintainer) and is built on the unofficial `piazza-api`, so it can break without notice; pin it (`uvx mcp-piazza@0.1.0`) once wired in. Chosen over `smchase/piazza-mcp` (4 tools, password only) and `RohanMuppa/Piazza-MCP` (password only).
+* **Run command:** `PIAZZA_KEEP_UNREAD=true uvx mcp-piazza serve`. `PIAZZA_KEEP_UNREAD=true` is mandatory: without it `get_post` and `get_posts` mark posts as read on the student's Piazza account.
+* **Sign-in** (once per computer; the session is saved in `~/.config/mcp-piazza/cookies.json`, removed with `uvx mcp-piazza logout`):
+  * **`login --password` (the method in use).** The password is typed into mcp-piazza's own hidden prompt on the student's machine; TrojanClaw never sees it. SSO-only accounts first set a Piazza password with **Forgot password** on piazza.com.
+  * **`login --browser chrome`.** Reads the Piazza session from Chrome; quit Chrome first. If macOS asks for "Chrome Safe Storage", click **Allow** once, never "Always Allow", because that key unlocks every Chrome cookie.
+  * **`login --cookie`.** Paste the `session_id` cookie at a hidden prompt; never as a command-line argument.
+* **Read-only allowlist** (in `config/connectors/piazza.yaml`, §5.11):
+
+  | Group | Tools |
+  | :--- | :--- |
+  | Courses | `list_courses` ✅ (ID, number, name, term, role, active flag, folders), `get_course_info` (description, syllabus, office hours, dates, staff), `get_course_stats` |
+  | Posts | `list_posts` (filters: all, unread, following, unresolved, unanswered, mine, starred, folder), `search_posts`, `get_post`, `get_posts` (up to 20 full threads per call), `get_post_history` |
+  | Catching up | `recent_activity` (since `24h`, `7d`, `2w` or an ISO date), `get_unread_counts`, `list_instructor_notes` |
+  | Files | `get_attachment` (up to 10 MB; on-demand only, never part of a sync) |
+
+  Courses can be referred to by ID, course number (`CSCI 566`) or part of the name, so no course IDs are configured anywhere.
+* **Sync recipe:** `list_courses` (active courses) → `recent_activity` since the stored cursor → `get_posts` in batches of 20 for full threads → `list_instructor_notes` → `get_course_info` (office hours and staff, refreshed occasionally). A sync only ever adds or updates posts.
+* **No grades or assignments** on Piazza; those come from Brightspace.
+* **Gate 1 status:** login ✅ and `list_courses` returns the owner's courses ✅. Still open: confirming the post tools' output fields for the mappings, and that `PIAZZA_KEEP_UNREAD` leaves posts unread. Not yet wired into the backend.
 
 ### 2.5 Fallback Paths
 
@@ -375,7 +405,7 @@ frontend/src/
    * Primary CTA: **"Sign In with Google"** with explicit calendar permission badges.
 
 2. **Onboarding Page (`/onboarding`):**
-   * **Connect USC Card (Sync Helper):** Install instructions for `trojanclaw-sync`, a **"Connect this computer"** button that shows the one-time pairing code, and live status for the first sync: *Paired → Waiting for USC login → Waiting for Piazza login → Synced N items*.
+   * **Connect USC Card (Sync Helper):** Install instructions for `trojanclaw-sync` (needs Node 22+ and uv), a **"Connect this computer"** button that shows the one-time pairing code, short guides for the two sign-ins (copying the Brightspace cookies from the browser's DevTools, and choosing a Piazza login method), and live status for the first sync: *Paired → Waiting for Brightspace sign-in → Waiting for Piazza sign-in → Synced N items*. It also shows per course what Brightspace actually provides, since some courses have no assignments or grades there.
    * **Fallback Card:** Tab 1, paste box for the Brightspace `.ics` URL with an accordion showing where to find it. Tab 2, **"Load Sample USC CS Student Feed"** with one click.
    * **Interests Card:** free-text interests plus chips suggested from the student's own courses and the categories in recent EngageSC events (not a fixed list in code). They are passed to `list_campus_events`.
    * **Preferences Card:** Time range slider for study windows (e.g., 5 PM – 9 PM) and maximum continuous block length (default 2 hrs).
@@ -503,7 +533,7 @@ Campus information comes from **configured sources and Claude extraction**, not 
 * **Fetching** only reaches allowed domains. Page HTML is cleaned with the existing `scraper/chunker.clean_html`.
 * **Events** are extracted from the cleaned page text with Claude **structured outputs** into a fixed schema, then validated: an event whose start time does not parse is dropped. Extracted events are cached in `campus_events` (§3.1) until the source's refresh interval passes.
 * If EngageSC turns out to serve a JSON endpoint (see the note below), that source switches to `kind: json` with a field mapping and no model call at all, by editing config only.
-* **Pages** (dining hours, orientation, office pages) are fetched on demand by the agent through the `fetch_usc_page` tool and searched through the existing campus `documents` store. This replaces the hard-coded `push_dining.py` and `push_deadlines.py` seed data.
+* **Pages** (dining hours, orientation, office pages) are fetched on demand by the agent through the `fetch_usc_page` tool and searched through the existing campus `documents` store. This replaces the hard-coded dining and deadline seed data, which has already been removed.
 
 ```python
 from pydantic import BaseModel
@@ -785,7 +815,8 @@ sync_helper/
     ├── cli.py                  # pair | login | run (poll jobs + scheduled sync) | sync-once | status
     ├── keychain.py             # stores the sync token in the OS keychain (`keyring` package)
     ├── mcp_runner.py           # starts MCP servers from config and enforces each allowlist
-    ├── recipes.py              # executes a connector's recipe steps (incl. for_each over earlier results)
+    ├── recipes.py              # executes recipe steps: for_each, batch_from/batch_size, refresh_hours
+    ├── live.py                 # answers live lookups from the agent (long-poll, allowlisted calls only)
     └── uploader.py             # talks to the Sync API below
 ```
 
@@ -800,6 +831,8 @@ sync_helper/
 | `POST /sync/jobs/{id}/status` | Helper (sync token) | Report `running`, `succeeded`, `failed` or `needs_login` |
 | `POST /sync/upload` | Helper (sync token) | Upload the raw result of one recipe step |
 | `POST /sync/jobs` | Dashboard (Google session) or the `request_sync` tool | "Sync now": queue a job |
+| `GET /sync/live/next` | Helper (sync token) | Long-poll (about 25 s) for a pending live lookup from the agent |
+| `POST /sync/live/{id}/result` | Helper (sync token) | Return the raw result of that live lookup |
 
 ```json
 POST /sync/upload
@@ -817,7 +850,7 @@ Authorization: Bearer <sync token>
 
 **Server-side normalizer (`backend/app/sync/normalizer.py`):**
 
-1. **Check:** the token decides `user_id` (never the body; revoked devices get `401`). `connector`, `step` and `tool` must match the server's own config and allowlist, so a modified helper cannot upload anything else.
+1. **Check:** the token decides `user_id` (never the body; revoked devices get `401`). `connector`, `step`, `tool` and `arguments` must match the server's own config, allowlist and argument rules, so a modified helper cannot upload anything else.
 2. **Map:** apply the step's field mapping from the connector config (§5.11) to turn each raw record into an item (`external_id`, `course_or_org`, `title`, `content`, `event_timestamp`, `raw_metadata`).
 3. **Extract when mapping falls short:** records the mapping cannot fill (a missing required field, or an upstream shape change after an MCP server upgrade) go to Claude **structured extraction** into the same item schema. Every result is validated (required fields present, timestamps parse); records that still fail are dropped and logged, never guessed. A rising extraction count is the signal to update the mapping.
 4. **Upsert:** on `(user_id, source, external_id)`; re-embed only items whose `content` changed; return the list of changed items (used for replanning, §7.3).
@@ -841,13 +874,19 @@ def server_params(connector: dict) -> StdioServerParameters:
     return StdioServerParameters(
         command=server["command"],
         args=server["args"],
-        env={**os.environ, **server.get("env", {})},  # e.g. D2L_HEADLESS, PIAZZA_KEEP_UNREAD
+        # Config env (D2L_NO_UPDATE_CHECK, PIAZZA_KEEP_UNREAD) plus local secrets the helper
+        # adds from the keychain at launch (D2L_SESSION_COOKIE). Secrets never come from the server.
+        env={**os.environ, **server.get("env", {}), **local_secrets(connector["id"])},
     )
 
 async def call_allowed(session: ClientSession, connector: dict, tool: str, args: dict) -> list:
-    """Calls one MCP tool if, and only if, the connector config allowlists it."""
+    """Calls one MCP tool if, and only if, the connector config allowlists it with these arguments."""
     if tool not in connector["allowed_tools"]:
         raise PermissionError(f"{tool} is not on the read-only allowlist for {connector['id']}")
+    # Argument rules, e.g. get_roster is allowed only without includeStudents (classmates' data).
+    for arg, forbidden in connector.get("forbidden_args", {}).get(tool, {}).items():
+        if args.get(arg) == forbidden:
+            raise PermissionError(f"{tool} with {arg}={forbidden!r} is not allowed for {connector['id']}")
     result = await session.call_tool(tool, args)
     payloads = []
     for block in result.content:
@@ -888,6 +927,7 @@ Every TrojanClaw capability the agent can use is a tool on one first-party MCP s
 | `list_campus_events(interests?, from?, to?)` | Campus | Cached EngageSC events, refreshed from configured sources (§5.3) | Refreshes the cache |
 | `request_sync(sources?)` | Sync (`sync.py`) | Queue a "Sync now" job for the Sync Helper | Queues a job |
 | `get_sync_status()` | Sync | Last successful sync per source, and whether a re-login is needed | None |
+| `live_lookup(connector, tool, arguments)` | Sync | One allowlisted read-only call made right now by the student's running helper, for things not worth syncing: handouts, transcripts, rubrics, course search, Piazza search, post history, attachments | None; result not stored. Fails fast if the helper is offline |
 
 **Not tools, on purpose** (only the student can trigger them from the UI): applying a proposal to Google Calendar, removing TrojanClaw events (undo), pairing or revoking a Sync Helper device, and changing preferences.
 
@@ -1054,7 +1094,7 @@ goals:
     max_tool_rounds: 8
     tools: [search_student_context, list_deadlines, list_announcements, get_agenda,
             search_campus_knowledge, fetch_usc_page, list_campus_events,
-            get_free_slots, propose_study_plan, request_sync, get_sync_status]
+            get_free_slots, propose_study_plan, request_sync, get_sync_status, live_lookup]
   plan_week:
     prompt: goals/plan_week.md
     effort: high
@@ -1064,29 +1104,102 @@ goals:
 ```
 
 ```yaml
-# config/connectors/piazza.yaml  (tool and field names are placeholders until the Gate 1 test)
+# config/connectors/brightspace.yaml  (tool names from brightspace.md; field names are placeholders
+# until each tool's output is recorded during Gate 1)
+id: brightspace
+source: brightspace
+server:
+  command: npx
+  args: [-y, brightspace-mcp-server@5.2.3]   # pinned; review every upgrade
+  env: {D2L_NO_UPDATE_CHECK: "1"}           # no "update notice" text blocks
+login:
+  method: cookie                            # D2L_SESSION_COOKIE from the keychain; `setup` once Duo works
+  secret_env: D2L_SESSION_COOKIE
+  expired_message: D2L_SESSION_COOKIE       # server error text that means "needs_login"
+sync_interval_minutes: 120
+allowed_tools: [get_my_courses, get_upcoming_due_dates, get_calendar_events, get_assignments,
+                get_my_grades, get_assignment_rubric, get_dropbox_feedback, get_assignment_files,
+                get_announcements, get_announcement_files, get_syllabus, get_course_content,
+                get_video_transcript, search_course, get_discussions, get_my_groups,
+                get_available_groups, get_roster]
+forbidden_args:
+  get_roster: {includeStudents: true}       # instructor and TA contacts only
+recipe:
+  - step: courses
+    tool: get_my_courses
+    snapshot: true
+  - step: due_dates
+    tool: get_upcoming_due_dates           # deadlines across all courses in one call
+    snapshot: true
+  - step: assignments
+    tool: get_assignments
+    for_each: courses
+    arguments: {courseId: "{{item.id}}"}   # argument name to confirm in Gate 1
+    snapshot: true
+  - step: calendar
+    tool: get_calendar_events
+    snapshot: true
+  - step: announcements
+    tool: get_announcements
+    for_each: courses
+    arguments: {courseId: "{{item.id}}"}
+    snapshot: false
+mappings:
+  due_dates:
+    external_id: "$.id"
+    course_or_org: "$.courseName"
+    title: "$.name"
+    content: "$.description"
+    event_timestamp: "$.dueDate"
+    raw_metadata: {type: "$.type"}
+```
+
+```yaml
+# config/connectors/piazza.yaml  (tool names from piazza.md; field names are placeholders
+# until each tool's output is recorded during Gate 1)
 id: piazza
 source: piazza
 server:
   command: uvx
-  args: [mcp-piazza]                  # pin an exact version once chosen
-  env: {PIAZZA_KEEP_UNREAD: "true"}
-login: {command: uvx, args: [mcp-piazza, login, --browser]}
+  args: [mcp-piazza@0.1.0, serve]          # pinned once wired in
+  env: {PIAZZA_KEEP_UNREAD: "true"}        # mandatory: never mark posts as read
+login:
+  methods: [password, browser, cookie]     # `mcp-piazza login --password | --browser chrome | --cookie`
+  session_file: ~/.config/mcp-piazza/cookies.json
 sync_interval_minutes: 120
-allowed_tools: []                     # read-only tool names from tools/list
+allowed_tools: [list_courses, get_course_info, get_course_stats, list_posts, search_posts,
+                get_post, get_posts, get_post_history, recent_activity, get_unread_counts,
+                list_instructor_notes, get_attachment]
+sync_excluded_tools: [get_attachment]      # on demand only, never part of a sync
 recipe:
-  - step: classes
-    tool: <list-classes tool>
+  - step: courses
+    tool: list_courses
     snapshot: true
-  - step: posts
-    tool: <list-posts tool>
-    for_each: classes                 # one call per class found by the previous step
-    arguments: {class_id: "{{item.id}}", since: "{{cursor.posts}}"}
-    snapshot: false                   # incremental: never deletes missing posts
+  - step: activity
+    tool: recent_activity
+    for_each: courses
+    arguments: {course: "{{item.id}}", since: "{{cursor.activity | default('2w')}}"}
+    snapshot: false                        # incremental: never deletes missing posts
+  - step: threads
+    tool: get_posts                        # full threads, up to 20 per call
+    batch_from: activity
+    batch_size: 20
+    snapshot: false
+  - step: instructor_notes
+    tool: list_instructor_notes
+    for_each: courses
+    arguments: {course: "{{item.id}}"}
+    snapshot: false
+  - step: course_info
+    tool: get_course_info                  # office hours and staff
+    for_each: courses
+    arguments: {course: "{{item.id}}"}
+    refresh_hours: 24
+    snapshot: true
 mappings:
-  posts:
+  threads:
     external_id: "$.id"
-    course_or_org: "$.class_name"
+    course_or_org: "$.course"
     title: "$.subject"
     content: "$.content"
     event_timestamp: "$.updated"
@@ -1115,33 +1228,47 @@ What exists in the repository today, as opposed to what this spec describes:
 | :--- | :--- | :--- |
 | **Backend foundation** | ✅ FastAPI app factory with `/`, `/healthcheck`, `/ready`, `/chat`, `/integrations`; Postgres connection pool; config, database and model-provider errors mapped to stable 503/502 responses | `backend/app/main.py`, `api/routes/`, `config.py`, `database.py`, `errors.py` |
 | **Campus RAG chat** | ✅ `POST /chat` embeds the question (OpenAI `text-embedding-3-small`), searches `documents` with pgvector, and answers with Claude Haiku 4.5. Scoped to one hard-coded `SINGLE_USER_ID`; no tools, no citations | `services/chat.py`, `repositories/documents.py`, `services/llm.py`, `services/prompts.py` |
-| **Database** | ✅ Two migrations: `documents` (pgvector + HNSW index), `app_users`, `integration_connections`, RLS enabled. (`piazza_data` also exists but belongs to the legacy Piazza import being replaced, see §6.2) | `supabase/migrations/` |
-| **Campus knowledge ingestion** | ✅ USC public-page scraper + chunker; dining hours and deadlines loaded from **hard-coded seed data** (upserts, not live feeds) | `backend/app/scraper/` |
-| **Tests** | ✅ 8 backend tests for the API contract, UUID search fix and error mapping. (3 more cover the legacy Piazza import and go away with it) | `backend/tests/` |
-| **Frontend** | 🟡 React 19 + Vite + TypeScript single-page chat with a profile modal (student type, school, courses). Sign-in is a **placeholder** (`localStorage` flag) | `frontend/src/App.tsx`, `lib/api.ts` |
+| **Database** | ✅ Three migrations: `documents` (pgvector + HNSW index), `app_users`, `integration_connections`, RLS enabled; the legacy `piazza_data` table is dropped (`20261114000000_drop_piazza_data.sql`) | `supabase/migrations/` |
+| **Campus knowledge ingestion** | ✅ USC public-page scraper + chunker into `documents`. The hard-coded dining and deadline seed scripts are removed; deadlines will come from Brightspace | `backend/app/scraper/` |
+| **Legacy cleanup** | ✅ Old Piazza import (`piazza_ingest.py`), its tests, the `piazza-api` dependency, the `piazza_data` table, the seed scripts, and the old booking, dining and search tools are removed | `README.md` status note |
+| **Brightspace prototype** | ✅ `brightspace-mcp-server@5.2.3` runs against `brightspace.usc.edu` with browser-cookie sign-in; `get_my_courses`, `get_upcoming_due_dates`, `get_calendar_events`, `get_assignments`, `get_my_grades`, `get_announcements`, `get_syllabus`, `get_course_content`, `search_course`, `get_discussions`, `get_my_groups` returned real data for CSCI 599 and CSCI 566. Allowlist and blocklist decided. **Not wired into the backend**; Duo sign-in pending | `brightspace.md`, §2.3 |
+| **Piazza prototype** | ✅ `mcp-piazza` login (password method) works and `list_courses` returns the owner's courses; run command and allowlist decided. **Not wired into the backend** | `piazza.md`, §2.4 |
+| **Tests** | ✅ 8 backend tests for the API contract, UUID search fix and error mapping | `backend/tests/` |
+| **Frontend** | 🟡 React 19 + Vite + TypeScript single-page chat (`useChat`) against `POST /chat`. The placeholder sign-in, profile form, task buttons and file picker are removed; there is no sign-in yet | `frontend/src/App.tsx`, `lib/api.ts` |
 | **Architecture & decisions** | ✅ This spec: multi-user hosted app + local Sync Helper; MCP-first and agentic design with configuration over code; Brightspace via `brightspace-mcp-server`; Piazza via `mcp-piazza`; deterministic slot and validation tools under the agent | This file, `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md` §15 |
 | **Scheduling core (reference code)** | 🟡 Free-slot engine and validator code written in §5.5 and §5.7 and checked against a sample week; **not yet in `backend/`** | §5.5–§5.7 |
 
 ### 6.2 Pending (Not Started Unless Noted)
 
 **Blocking gates (do first):**
-1. **Login gate tests:** confirm USC SSO + Duo works through `brightspace-mcp-server` (which Duo method works, how long the session lasts, §2.3), and that `mcp-piazza login --browser` works with a USC student's Piazza account and leaves posts unread with `PIAZZA_KEEP_UNREAD=true` (§2.4).
+1. **Login gate tests (partly done, §2.3, §2.4):**
+   * ✅ Brightspace cookie sign-in and the main read tools; ✅ Piazza password login and `list_courses`.
+   * ⏳ Brightspace automatic sign-in with Duo (`setup`), owned by a teammate.
+   * ⏳ How long Brightspace cookies and Piazza sessions last (this sets how often students re-sign-in).
+   * ⏳ Record the output fields of each recipe tool into the connector mappings, and confirm `PIAZZA_KEEP_UNREAD=true` leaves posts unread.
 2. **Schema reconciliation:** §3.1 uses `users` / `student_context_items` / `item_embeddings`, but the existing migrations use `app_users` / `documents`. Recommended: extend `app_users` as the users table (Google fields, refresh token, `study_preferences`), keep `documents` for campus knowledge only, and add the student tables plus `sync_devices`, `sync_jobs`, `sync_cursors`, `study_plan_proposals` and `campus_events` in a new migration. Update §3.1 to match.
 3. **Google Cloud project:** OAuth client, consent screen, and the judges' Google accounts added as **test users** (the app stays unverified, so only listed test users can grant `calendar.events`).
 
+**Open decisions (raised by the prototypes):**
+1. **Synced vs live.** The `piazza_data` drop migration says Piazza "is now read live through the mcp-piazza server", and both prototype notes run the servers on the owner's laptop. This spec keeps **sync for the core data** (deadlines, announcements, recent posts, courses), because the feed, scheduling and multi-user hosting need it in the database, and adds **live lookups through the helper** for everything else (§2.2, §5.9). Confirm the team agrees.
+2. **Grades.** `get_my_grades`, `get_dropbox_feedback` and `get_assignment_rubric` work. Recommended: allow them **live only** (through `live_lookup`), so grades are never stored on the hosted server, unless the team decides storing them is acceptable.
+3. **Default Piazza sign-in.** The prototype uses `--password`, which makes SSO-only students create a Piazza password. Decide whether onboarding defaults to password, Chrome session, or cookie.
+
 **Build work** (grouped by owner, see §7):
 * **Platform, data & campus:**
-  * Google sign-in, sessions and per-user scoping (replaces `SINGLE_USER_ID` and the `localStorage` placeholder).
+  * Google sign-in, sessions and per-user scoping (replaces `SINGLE_USER_ID`; the frontend currently has no sign-in).
   * New migration for the student, sync, proposal and campus-event tables, plus RLS policies; the upsert and vector-search repository.
-  * Student-data and campus MCP tools. Campus pages and EngageSC events are pulled live from configured sources with Claude extraction (§5.3), replacing the hard-coded `push_dining.py` / `push_deadlines.py` seed data.
+  * Student-data and campus MCP tools. Campus pages (for example dining hours, whose seed data is already removed) and EngageSC events are pulled live from configured sources with Claude extraction (§5.3).
 * **Sync & connectors:**
   * Config-driven Sync Helper (§5.8), the Sync API including `GET /sync/config`, and the server-side normalizer (config mappings first, Claude extraction as fallback).
-  * Connector configs for Brightspace and Piazza: pinned server versions, allowlists, recipes, mappings.
-  * **Dynamic Piazza (reimplementation):** the current `scraper/piazza_ingest.py` is a static, single-user import (fixed course IDs or JSON exports, full replace of the corpus on each run). It is being rebuilt as a per-student, on-demand sync through the Sync Helper and `mcp-piazza`, driven entirely by `config/connectors/piazza.yaml`:
-    * The student logs in to Piazza in the helper's browser window; no password or course IDs are configured.
-    * The recipe discovers the student's enrolled Piazza classes on every sync.
-    * Each sync pulls only new or updated posts since the stored cursor and upserts them by post ID, so a sync never wipes existing posts.
+  * Connector configs for Brightspace and Piazza (§5.11): versions, run commands and allowlists are known from the prototypes; recipes and field mappings still need the Gate 1 output samples.
+  * **Wire Brightspace in:** cookie sign-in through the helper (hidden prompt → keychain → `D2L_SESSION_COOKIE`), expiry detection → `needs_login`, then Duo `setup` once it works.
+  * **Dynamic Piazza (reimplementation):** the old static import is already removed. Piazza is rebuilt as a per-student, on-demand sync through the Sync Helper and `mcp-piazza`, driven entirely by `config/connectors/piazza.yaml`:
+    * The student signs in once with `mcp-piazza login`; no course IDs are configured.
+    * The recipe discovers the student's courses (`list_courses`) on every sync.
+    * Each sync pulls only posts with new activity since the stored cursor (`recent_activity` → `get_posts`) and upserts them by post ID, so a sync never wipes existing posts.
     * Runs on "Sync now" (from the dashboard or the agent's `request_sync` tool) and on the helper's schedule, with `PIAZZA_KEEP_UNREAD=true` always set.
+  * Live lookups (`live_lookup` tool, `/sync/live/*`, helper `live.py`).
   * `.ics` fallback, demo fixture loader, and the sync MCP tools.
 * **Agent, scheduling & calendar:**
   * TrojanClaw MCP server skeleton, per-run tokens and run state (§5.9).
@@ -1152,21 +1279,18 @@ What exists in the repository today, as opposed to what this spec describes:
 * **Frontend:** Landing / Onboarding / Dashboard (§4) with streamed agent progress, tool activity and sources, proposal approval, and agent-suggested prompts.
 * **Hosting** for the backend and frontend, and the end-to-end demo script.
 
-**Cleanup:**
-* After dynamic Piazza works: remove `scraper/piazza_ingest.py`, its 3 tests, the `piazza-api` dependency and the `piazza_data` table.
-* After the campus tools work: remove the hard-coded seed scripts (`push_dining.py`, `push_deadlines.py`).
-* After `/agent/chat` works: remove the old fixed RAG chat path (`services/chat.py`, `services/llm.py`, `services/prompts.py`) and the URL-based `integrations/registry.py`.
+**Cleanup:** the legacy Piazza import and the seed scripts are already removed. Still to do after `/agent/chat` works: remove the old fixed RAG chat path (`services/chat.py`, `services/llm.py`, `services/prompts.py`), the URL-based `integrations/registry.py`, and the unused `PIAZZA_MCP_URL` / `BRIGHTSPACE_MCP_URL` settings (MCP servers run on the helper over stdio, not at a URL).
 
 ### 6.3 What Is Achievable
 
 | Tier | Scope | Confidence |
 | :--- | :--- | :--- |
 | **Must ship (core demo)** | Google sign-in → load demo profile or paste `.ics` → priority feed → **"Plan my week" agent** (calls `list_deadlines`, `list_announcements`, `get_free_slots`, `propose_study_plan` on the TrojanClaw MCP server) → student approves → events in a "TrojanClaw" Google Calendar → undo. Agent chat that answers from the student's own deadlines and posts through the same tools. Goals, tools and models driven by `config/` and `prompts/` | High. No dependency on USC SSO or unofficial APIs; the MCP server and agent loop are standard SDK pieces |
-| **Should ship** | Sync Helper with **Brightspace via MCP** (if the gate test passes) and **dynamic Piazza via `mcp-piazza`**, config-driven recipes and mappings, Claude extraction fallback in the normalizer, "Sync now" from the dashboard or the agent, campus tools (live USC pages, EngageSC events) | Medium. Depends on the gate tests, on `mcp-piazza` staying stable, and on EngageSC being fetchable |
-| **Stretch** | `replan_on_change` goal (an extension or moved exam triggers a new proposal), `weekly_brief` goal, scheduled helper sync, "Re-login needed" banner, using the TrojanClaw MCP server from another MCP client such as Claude Desktop (needs OAuth), a sync agent that decides live what the helper should fetch | Medium–low, time permitting |
-| **Out of scope** | Grades and feedback, class rosters, any write to Brightspace or Piazza, writes to Google Calendar without the student's approval, mobile app, Google app verification, hosted (server-side) USC login | Not planned |
+| **Should ship** | Sync Helper with **Brightspace via MCP** (cookie sign-in works today) and **dynamic Piazza via `mcp-piazza`**, config-driven recipes and mappings, Claude extraction fallback in the normalizer, "Sync now" from the dashboard or the agent, **live lookups** (handouts, transcripts, course and Piazza search, grades if approved), campus tools (live USC pages, EngageSC events) | Medium–high. Both servers are proven on real courses; risks are cookie lifetime, `mcp-piazza` being v0.1.0 on an unofficial API, and EngageSC being fetchable |
+| **Stretch** | Brightspace Duo sign-in (`setup`) instead of cookies, `replan_on_change` goal (an extension or moved exam triggers a new proposal), `weekly_brief` goal, scheduled helper sync, "Re-login needed" banner, using the TrojanClaw MCP server from another MCP client such as Claude Desktop (needs OAuth), a sync agent that decides live what the helper should fetch | Medium–low, time permitting |
+| **Out of scope** | Storing grades on the hosted server (pending decision 2), classmates' personal data (`get_classlist_emails`, roster with students), downloading course files to disk, any write to Brightspace or Piazza, writes to Google Calendar without the student's approval, mobile app, Google app verification, hosted (server-side) USC login | Not planned |
 
-**Demo safety net:** the Must-ship path runs entirely on the demo fixture and the `.ics` fallback, so the demo works even if USC SSO, Piazza, or EngageSC fail on the day.
+**Demo safety net:** the Must-ship path runs entirely on the demo fixture and the `.ics` fallback, so the demo works even if a Brightspace cookie expires, Piazza changes its internal API, or EngageSC fails on the day.
 
 ---
 
@@ -1178,11 +1302,11 @@ Each person owns separate folders, endpoints, MCP tool modules and config files,
 
 | | **P1: Platform, Data & Campus** | **P2: Sync & Connectors** | **P3: Agent, Scheduling & Calendar** | **P4: Frontend & Demo** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Owns (files)** | `supabase/migrations/**`, `backend/app/auth/**`, `repositories/**`, `services/embeddings.py`, `database.py`, `config.py`, `api/routes/{auth,me,items,health}.py`, `backend/app/campus/**`, `mcp_server/tools/{student_data,campus}.py`, `config/campus_sources.yaml`, existing campus `scraper/` (except `piazza_ingest.py`), root-level hosting/deploy config | `sync_helper/**`, `backend/app/connectors/**`, `backend/app/sync/**` (normalizer, pairing, jobs, cursors), `api/routes/{sync,integrations}.py`, `integrations/**`, `mcp_server/tools/sync.py`, `config/connectors/**`, `fixtures/**`, removal of `scraper/piazza_ingest.py` + its tests + the `piazza-api` dependency | `backend/app/agent/**` (runtime, tokens, run state, config loader, `extract_structured`, slots, validator), `backend/app/mcp_server/server.py`, `mcp_server/tools/{scheduling,calendar}.py`, `backend/app/calendar/**`, `api/routes/{agent,schedule,calendar}.py`, `config/{agent,scheduling}.yaml`, `prompts/**`, removal of the old `/chat` services | `frontend/**` (all of it), demo script and pitch flow |
-| **MCP tools** | `search_student_context`, `list_deadlines`, `list_announcements`, `get_preferences`, `search_campus_knowledge`, `fetch_usc_page`, `list_campus_events` | `request_sync`, `get_sync_status` | `get_free_slots`, `propose_study_plan`, `get_agenda` (and the server they all register on) | None |
-| **Endpoints** | `GET /auth/google/login`, `GET /auth/google/callback`, `POST /auth/logout`, `GET /me`, `PUT /me/preferences`, `GET /items` (priority feed), `/healthcheck`, `/ready` | `POST /sync/pairing-codes`, `POST /sync/pair`, `GET /sync/config`, `POST /sync/jobs`, `GET /sync/jobs/next`, `POST /sync/jobs/{id}/status`, `POST /sync/upload`, `POST /connectors/ics`, `POST /connectors/demo`, `GET /integrations` (sync status) | `POST /agent/{goal}` (streamed), `POST /chat` (temporary alias), `POST /schedule/proposals/{id}/apply`, `POST /schedule/proposals/{id}/dismiss`, `DELETE /schedule` (undo), `GET /calendar/agenda` | None (consumes all of the above) |
-| **Deliverables** | • Gate 2: schema reconciliation + new migration (student, embeddings, calendar, sync, cursor, proposal, campus-event tables) and RLS<br>• Drop the legacy `piazza_data` table once P2 confirms dynamic Piazza works<br>• Gate 3: Google Cloud OAuth setup and test users<br>• Google sign-in, session cookie, `get_current_user`; stores encrypted refresh token<br>• `upsert_items()` with change detection + embedding; `search_context()`, `list_items()`, `preferences_for()`<br>• Student-data and campus MCP tools; campus sources config; EngageSC extraction and cache; remove the seed scripts<br>• Backend + frontend hosting | • Gate 1: login tests for `brightspace-mcp-server` (USC SSO + Duo) and `mcp-piazza`; record real tool names and output shapes into the connector configs<br>• Config-driven Sync Helper: pair, login, run, sync-once, status; recipes; keychain token<br>• Sync API incl. `/sync/config`; server-side normalizer (mappings → Claude extraction → validation); snapshot deletes and cursors<br>• **Dynamic Piazza** through `config/connectors/piazza.yaml` (class discovery, incremental posts); then retire the legacy import<br>• `.ics` fallback, demo fixture + loader, sync MCP tools | • Day 1: MCP server skeleton + `current_run` + run tokens + agent runtime with a stub tool, so P1 and P2 can register tools immediately<br>• `config/agent.yaml`, goal prompts (`chat`, `plan_week`), `prompts/system.md`<br>• Slot engine and validator from §5.5 / §5.7 with tests; scheduling and calendar tools<br>• Google Calendar service: free/busy, dedicated "TrojanClaw" calendar, idempotent insert, undo<br>• Proposal approve flow with the re-check; `extract_structured()` helper for P1 and P2<br>• Remove the old `/chat` services once `/agent/chat` works | • Landing, Onboarding (pair code, `.ics` paste, demo toggle, interests, preferences), Dashboard (sync status, feed, timeline with proposal blocks, approve / undo, chat drawer)<br>• Streamed agent UI: progress, tool activity, sources, suggested prompts<br>• Real Google sign-in flow; remove the `localStorage` placeholder<br>• API client and mocks (including a mocked agent stream) until backends land<br>• End-to-end demo script and rehearsal checklist |
-| **Done when** | A new student can sign in, preferences save, `GET /items` and the student-data tools return only that student's rows, and campus questions are answered from live USC pages instead of seed data | `trojanclaw-sync` pairs, logs in and uploads; re-running creates no duplicates; posts from every Piazza class the student is enrolled in appear with no course IDs configured, and a second sync uploads only new or edited posts; a mapping change in config needs no helper release; demo and `.ics` load without the helper | "Plan my week" is decided by the agent through tools only; proposals never overlap busy time or miss a deadline; nothing reaches Google Calendar until the student approves; changing a goal's prompt, tools or model in config changes behavior with no code change | A judge can go from landing page to approved, synced calendar using only the demo profile, with no console errors |
+| **Owns (files)** | `supabase/migrations/**`, `backend/app/auth/**`, `repositories/**`, `services/embeddings.py`, `database.py`, `config.py`, `api/routes/{auth,me,items,health}.py`, `backend/app/campus/**`, `mcp_server/tools/{student_data,campus}.py`, `config/campus_sources.yaml`, existing campus `scraper/`, root-level hosting/deploy config | `sync_helper/**`, `backend/app/connectors/**`, `backend/app/sync/**` (normalizer, pairing, jobs, cursors), `api/routes/{sync,integrations}.py`, `integrations/**`, `mcp_server/tools/sync.py`, `config/connectors/**`, `fixtures/**`, `brightspace.md`, `piazza.md` (prototype notes) | `backend/app/agent/**` (runtime, tokens, run state, config loader, `extract_structured`, slots, validator), `backend/app/mcp_server/server.py`, `mcp_server/tools/{scheduling,calendar}.py`, `backend/app/calendar/**`, `api/routes/{agent,schedule,calendar}.py`, `config/{agent,scheduling}.yaml`, `prompts/**`, removal of the old `/chat` services | `frontend/**` (all of it), demo script and pitch flow |
+| **MCP tools** | `search_student_context`, `list_deadlines`, `list_announcements`, `get_preferences`, `search_campus_knowledge`, `fetch_usc_page`, `list_campus_events` | `request_sync`, `get_sync_status`, `live_lookup` | `get_free_slots`, `propose_study_plan`, `get_agenda` (and the server they all register on) | None |
+| **Endpoints** | `GET /auth/google/login`, `GET /auth/google/callback`, `POST /auth/logout`, `GET /me`, `PUT /me/preferences`, `GET /items` (priority feed), `/healthcheck`, `/ready` | `POST /sync/pairing-codes`, `POST /sync/pair`, `GET /sync/config`, `POST /sync/jobs`, `GET /sync/jobs/next`, `POST /sync/jobs/{id}/status`, `POST /sync/upload`, `GET /sync/live/next`, `POST /sync/live/{id}/result`, `POST /connectors/ics`, `POST /connectors/demo`, `GET /integrations` (sync status) | `POST /agent/{goal}` (streamed), `POST /chat` (temporary alias), `POST /schedule/proposals/{id}/apply`, `POST /schedule/proposals/{id}/dismiss`, `DELETE /schedule` (undo), `GET /calendar/agenda` | None (consumes all of the above) |
+| **Deliverables** | • Gate 2: schema reconciliation + new migration (student, embeddings, calendar, sync, cursor, proposal, campus-event tables) and RLS (`piazza_data` is already dropped)<br>• Gate 3: Google Cloud OAuth setup and test users<br>• Google sign-in, session cookie, `get_current_user`; stores encrypted refresh token<br>• `upsert_items()` with change detection + embedding; `search_context()`, `list_items()`, `preferences_for()`<br>• Student-data and campus MCP tools; campus sources config; EngageSC extraction and cache<br>• Remove the unused `PIAZZA_MCP_URL` / `BRIGHTSPACE_MCP_URL` settings<br>• Backend + frontend hosting | • Finish Gate 1: Duo sign-in for Brightspace (with the teammate working on it), session lifetimes, and output field samples for every recipe tool → connector mappings<br>• Config-driven Sync Helper: pair, login (Brightspace cookie → keychain; `mcp-piazza login`), run, sync-once, status; recipes; keychain token<br>• Sync API incl. `/sync/config`; server-side normalizer (mappings → Claude extraction → validation); snapshot deletes and cursors<br>• **Dynamic Piazza** through `config/connectors/piazza.yaml` (course discovery, incremental posts)<br>• Live lookups: `live_lookup` tool, `/sync/live/*`, helper `live.py`<br>• Remove `integrations/registry.py` once sync status replaces it<br>• `.ics` fallback, demo fixture + loader, sync MCP tools | • Day 1: MCP server skeleton + `current_run` + run tokens + agent runtime with a stub tool, so P1 and P2 can register tools immediately<br>• `config/agent.yaml`, goal prompts (`chat`, `plan_week`), `prompts/system.md`<br>• Slot engine and validator from §5.5 / §5.7 with tests; scheduling and calendar tools<br>• Google Calendar service: free/busy, dedicated "TrojanClaw" calendar, idempotent insert, undo<br>• Proposal approve flow with the re-check; `extract_structured()` helper for P1 and P2<br>• Remove the old `/chat` services once `/agent/chat` works | • Landing, Onboarding (pair code, `.ics` paste, demo toggle, interests, preferences), Dashboard (sync status, feed, timeline with proposal blocks, approve / undo, chat drawer)<br>• Streamed agent UI: progress, tool activity, sources, suggested prompts<br>• Real Google sign-in flow; remove the `localStorage` placeholder<br>• API client and mocks (including a mocked agent stream) until backends land<br>• End-to-end demo script and rehearsal checklist |
+| **Done when** | A new student can sign in, preferences save, `GET /items` and the student-data tools return only that student's rows, and campus questions are answered from live USC pages instead of seed data | `trojanclaw-sync` pairs, logs in and uploads; re-running creates no duplicates; posts from every Piazza class the student is enrolled in appear with no course IDs configured, and a second sync uploads only new or edited posts; an expired Brightspace cookie shows "Re-login needed" instead of failing silently; the agent can read a handout or search Piazza through `live_lookup` while the helper runs; a mapping change in config needs no helper release; demo and `.ics` load without the helper | "Plan my week" is decided by the agent through tools only; proposals never overlap busy time or miss a deadline; nothing reaches Google Calendar until the student approves; changing a goal's prompt, tools or model in config changes behavior with no code change | A judge can go from landing page to approved, synced calendar using only the demo profile, with no console errors |
 
 ### 7.2 Interfaces Between Owners
 
@@ -1204,10 +1328,10 @@ Each interface has exactly one owner, who builds it; everyone else calls it.
 
 ### 7.3 Order of Work
 
-1. **Day 1 (all four, in parallel):** P1 starts Gates 2 and 3. P2 runs Gate 1 (Brightspace and Piazza logins) and writes the first connector configs. P3 stands up the MCP server skeleton and agent runtime with one stub tool, then the slot engine and validator with fake free/busy data. P4 scaffolds the three pages against mock JSON and a mocked agent stream. Together, agree on endpoint JSON shapes and on tool names and descriptions (§7.2).
+1. **Day 1 (all four, in parallel):** P1 starts Gates 2 and 3. P2 finishes Gate 1 (output samples and session lifetimes; sign-in already works) and writes the first connector configs from `brightspace.md` and `piazza.md`. P3 stands up the MCP server skeleton and agent runtime with one stub tool, then the slot engine and validator with fake free/busy data. P4 scaffolds the three pages against mock JSON and a mocked agent stream. Together, agree on endpoint JSON shapes and on tool names and descriptions (§7.2).
 2. **Core path:** P1 ships sign-in, schema, `upsert_items` and the student-data tools. P2 ships the normalizer (mapping path), the demo fixture loader and the `.ics` fallback. P3 ships the scheduling and calendar tools, the `chat` and `plan_week` goals, and proposal approve / undo. P4 swaps mocks for real calls and adds the approval UI. → **Must-ship tier complete.**
-3. **Sync and campus path:** P2 ships the Sync Helper, `/sync/config`, recipes, Brightspace and dynamic Piazza, the Claude extraction fallback and the sync tools, then retires the legacy Piazza import (P1 drops `piazza_data`). P1 ships the campus tools and EngageSC extraction, removes the seed scripts, and sets up hosting. P4 adds pairing, sync status and tool-activity UI. P3 removes the old `/chat` services.
-4. **Stretch and polish:** the `replan_on_change` goal (P3 adds the prompt and config; it runs on the changed-item list that P1's `upsert_items` returns) and the `weekly_brief` goal. External MCP client access (P3). Demo rehearsal (P4 runs it, everyone attends).
+3. **Sync and campus path:** P2 ships the Sync Helper, `/sync/config`, recipes, Brightspace (cookie sign-in) and dynamic Piazza, the Claude extraction fallback, live lookups and the sync tools. P1 ships the campus tools and EngageSC extraction, and sets up hosting. P4 adds pairing, sync status and tool-activity UI. P3 removes the old `/chat` services.
+4. **Stretch and polish:** Brightspace Duo sign-in replacing cookies (P2), the `replan_on_change` goal (P3 adds the prompt and config; it runs on the changed-item list that P1's `upsert_items` returns) and the `weekly_brief` goal. External MCP client access (P3). Demo rehearsal (P4 runs it, everyone attends).
 
 ---
 
@@ -1245,7 +1369,9 @@ TROJANCLAW_CONFIG_DIR=.
 # Hosted TrojanClaw backend the helper talks to (its only setting)
 TROJANCLAW_API_URL=https://your-trojanclaw-backend.example.com
 ```
-Everything else the helper needs (MCP server commands and pinned versions, `D2L_HEADLESS`, `PIAZZA_KEEP_UNREAD`, allowlists, recipes, sync interval) comes from the server through `GET /sync/config`. The sync token is not in this file either. It lives in the OS keychain after `trojanclaw-sync pair`.
+Everything else the helper needs (MCP server commands and pinned versions, `D2L_NO_UPDATE_CHECK`, `PIAZZA_KEEP_UNREAD`, allowlists, argument rules, recipes, sync interval) comes from the server through `GET /sync/config`.
+
+Secrets are never in this file and never come from the server: the sync token (after `trojanclaw-sync pair`) and the Brightspace cookie for `D2L_SESSION_COOKIE` (after `trojanclaw-sync login brightspace`) live in the OS keychain, and the Piazza session lives in mcp-piazza's own `~/.config/mcp-piazza/cookies.json`. The helper needs Node 22+ (for `npx`) and uv (for `uvx`).
 
 ### Frontend (`frontend/.env`)
 ```env
