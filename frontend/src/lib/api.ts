@@ -125,10 +125,12 @@ export interface UscLoginStatus {
 
 export class ApiError extends Error {
   status: number;
+  code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -148,7 +150,7 @@ export async function apiRequest<T>(path: string, body?: object): Promise<T> {
       : Array.isArray(data.detail)
         ? data.detail.map((item: { msg: string }) => item.msg.replace(/^Value error, /, "")).join(" ")
         : "Could not reach your account. Please try again.";
-    throw new ApiError(detail, response.status);
+    throw new ApiError(detail, response.status, typeof data.code === "string" ? data.code : undefined);
   }
   return response.status === 204 ? undefined as T : response.json();
 }

@@ -50,12 +50,12 @@ class GoogleSignIn:
 
     def _get(self, token):
         if not token or len(token) > 128:
-            raise AppError("This Google sign-in expired. Please start again.", "google_signin_expired", 400)
+            raise AppError("This Google sign-in expired or the server restarted. Please start again.", "google_signin_expired", 400)
         key = token_hash(token)
         attempt = self.attempts.get(key)
         if attempt is None or time.monotonic() - attempt.started > ATTEMPT_SECONDS:
             self.attempts.pop(key, None)
-            raise AppError("This Google sign-in expired. Please start again.", "google_signin_expired", 400)
+            raise AppError("This Google sign-in expired or the server restarted. Please start again.", "google_signin_expired", 400)
         return attempt
 
     def start(self, old_token=None, *, redirect_uri=None, frontend_url=None):

@@ -120,6 +120,54 @@ def test_users_never_share_connections_or_browser_contexts(hosted):
     assert "private-cookie" not in repr(hosted.repository.rows)
 
 
+@pytest.mark.parametrize("provider", ["brightspace", "handshake", "piazza"])
+def test_verified_reauthentication_replaces_unreadable_session_only_for_owner(hosted, provider):
+    connected(hosted, A, provider)
+    connected(hosted, B, provider)
+    other = hosted.repository.get(B, provider)
+    row = hosted.repository.rows[(A, provider)]
+    old = SessionVault(Fernet.generate_key().decode())
+    row["session"] = old.seal(A, provider, "session", {"cookies": [{"name": "session", "value": "lost-key-cookie"}]})
+    fresh = {"origin": "https://piazza.com" if provider == "piazza" else "https://brightspace.usc.edu" if provider == "brightspace" else "https://usc.joinhandshake.com",
+             "cookies": [{"name": "session", "value": "new-verified-cookie"}]}
+    hosted.import_session(A, provider, fresh)
+    assert hosted._session(A, provider)[1]["cookies"] == fresh["cookies"]
+    assert hosted.repository.get(B, provider) == other
+
+
+def test_unreadable_session_fails_closed_but_explicit_connect_starts_fresh(hosted):
+    connected(hosted)
+    hosted.repository.rows[(A, "handshake")]["session"] = b"unreadable-old-ciphertext"
+    hosted.runtime.run.reset_mock()
+    with pytest.raises(AppError) as exc:
+        hosted.tools(A, ["handshake"])
+    assert exc.value.code == "session_invalid"
+    assert hosted.repository.get(A, "handshake")["state"] == "needs_login"
+    hosted.runtime.run.assert_not_called()
+    login = hosted.connect(A, "handshake")
+    hosted.finish(A, "handshake", UUID(login["login_id"]))
+    assert hosted._session(A, "handshake")[1]["cookies"]
+
+
+def test_failed_fresh_verification_does_not_replace_unreadable_record(hosted):
+    connected(hosted)
+    hosted.repository.rows[(A, "handshake")]["session"] = b"unreadable-old-ciphertext"
+    hosted.runtime.run.side_effect = AppError("Verification failed", "verification_required", 409)
+    with pytest.raises(AppError):
+        hosted.import_session(A, "handshake", {"cookies": []})
+    assert hosted.repository.get(A, "handshake")["session"] == b"unreadable-old-ciphertext"
+    assert hosted.repository.get(A, "handshake")["state"] == "connected"
+
+
+def test_skipped_handshake_replaces_unreadable_saved_context_after_usc_verification(hosted):
+    connected(hosted)
+    hosted.repository.rows[(A, "handshake")]["session"] = b"unreadable-old-ciphertext"
+    context = str(uuid4())
+    assert hosted.import_handshake_login_context(A, context)
+    assert hosted.owns_handshake_context(A, context)
+    assert hosted.repository.get(A, "handshake")["state"] == "needs_login"
+
+
 def test_handshake_adopts_usc_browser_without_copying_or_losing_idp_state(hosted):
     context = str(uuid4())
     hosted.import_session(A, 'handshake', {'origin':'https://usc.joinhandshake.com', 'cookies':[{'name':'session','value':'test'}]},

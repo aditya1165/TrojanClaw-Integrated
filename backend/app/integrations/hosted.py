@@ -39,6 +39,19 @@ class HostedConnectors:
     def _seal(self, user_id, provider, purpose, payload):
         return self._vault_factory().seal(user_id, provider, purpose, payload)
 
+    def _previous_session(self, user_id, provider, ciphertext):
+        """Reauthentication may replace old ciphertext whose key was lost.
+
+        Only use while explicitly connecting or importing a newly verified login.
+        Ordinary reads must fail closed; an unreadable context cannot be reused.
+        """
+        try:
+            return self._open(user_id, provider, "session", ciphertext)
+        except AppError as exc:
+            if exc.code != "session_invalid":
+                raise
+            return {}
+
     def _login(self, user_id: UUID, provider: str, operation_id: UUID | None = None):
         self._provider(provider)
         row = self.repository.get(user_id, provider)
@@ -55,7 +68,7 @@ class HostedConnectors:
         row = self.repository.reserve(user_id, provider)
         remote, created_context = None, None
         try:
-            session = self._open(user_id, provider, "session", row["session"])
+            session = self._previous_session(user_id, provider, row["session"])
             context_id = session.get("context_id")
             if not context_id:
                 context_id = created_context = browser.create_context()
@@ -108,7 +121,7 @@ class HostedConnectors:
         context_id, remote = None, None
         created_context = False
         try:
-            previous = self._open(user_id, provider, "session", row["session"])
+            previous = self._previous_session(user_id, provider, row["session"])
             context_id = managed_context_id or previous.get("context_id")
             if not context_id:
                 context_id = browser.create_context()
@@ -134,7 +147,7 @@ class HostedConnectors:
 
     def owns_handshake_context(self, user_id: UUID, context_id: str) -> bool:
         row = self.repository.get(user_id, "handshake")
-        return bool(row and self._open(user_id, "handshake", "session", row["session"]).get("context_id") == context_id)
+        return bool(row and self._previous_session(user_id, "handshake", row["session"]).get("context_id") == context_id)
 
     def import_handshake_login_context(self, user_id: UUID, context_id: str) -> bool:
         """Retain this authenticated owner's USC context when Handshake is skipped.
@@ -143,11 +156,11 @@ class HostedConnectors:
         keeps the IdP browser state with Browserbase, never in cookie JSON.
         """
         existing = self.repository.get(user_id, "handshake")
-        if existing and self._open(user_id, "handshake", "session", existing["session"]).get("cookies"):
+        if existing and self._previous_session(user_id, "handshake", existing["session"]).get("cookies"):
             return False
         row = self.repository.reserve(user_id, "handshake")
         try:
-            previous = self._open(user_id, "handshake", "session", row["session"])
+            previous = self._previous_session(user_id, "handshake", row["session"])
             if previous.get("context_id") and previous["context_id"] != context_id:
                 self._browser_factory().delete_context(previous["context_id"])
             self.repository.attach(user_id, "handshake", row["operation_id"],
@@ -184,7 +197,12 @@ class HostedConnectors:
         row = self.repository.get(user_id, provider)
         if not row or row["state"] != "connected":
             raise AppError(f"Connect your {provider.title()} account first.", "needs_login", 409)
-        session = self._open(user_id, provider, "session", row["session"])
+        try:
+            session = self._open(user_id, provider, "session", row["session"])
+        except AppError as exc:
+            if exc.code == "session_invalid":
+                self.repository.mark_needs_login(user_id, provider, row["session"])
+            raise
         if not session.get("cookies"):
             raise AppError("Your session is missing. Reconnect this source.", "needs_login", 409)
         return row, session

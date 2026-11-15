@@ -1,5 +1,8 @@
 # Remote multi-user deployment
 
+For a quick Replit setup, use [REPLIT.md](REPLIT.md). The included launcher builds
+the frontend and serves it with the API on one port, using Browserbase.
+
 See [the remote-browser guide](docs/remote-browser.md) for user instructions,
 USC bootstrap behavior, implementation details, and troubleshooting.
 

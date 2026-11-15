@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { authRequest, type AccountProfile, type UscLoginStatus } from "./lib/api";
+import { ApiError, authRequest, type AccountProfile, type UscLoginStatus } from "./lib/api";
 import { CloseIcon } from "./components/ui";
 import { RemoteSignIn } from "./components/RemoteSignIn";
 
@@ -95,6 +95,10 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
       }
     } catch (reason) {
       setProgress(null);
+      if (reason instanceof ApiError && ["google_signin_expired", "login_expired", "session_invalid"].includes(reason.code ?? "")) {
+        setRemote(null);
+        skipHandshake.current = false;
+      }
       setError(reason instanceof Error ? reason.message : "Couldn't finish signing in. Please try again.");
     } finally {
       attemptRef.current = null;

@@ -69,6 +69,9 @@ Connector logins run in private Browserbase Chromium sessions, and each TrojanCl
 
 ## 🚀 Quick start
 
+**Hosting on Replit?** Use the [Replit quick setup](REPLIT.md). The included
+launcher installs dependencies and serves the built website and API on one port.
+
 ### What you need
 
 | Tool | Version | Used for |
