@@ -158,14 +158,22 @@ export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const requestSequence = useRef(0);
+  const [replyProposalIds, setReplyProposalIds] = useState<Set<string> | null>(null);
   const [recentResult, setRecentResult] = useState<{ id: string; refreshKey: string } | null>(null);
   useEffect(() => {
     const refresh = () => setRevision((value) => value + 1);
+    const started = () => {
+      requestSequence.current++;
+      setReplyProposalIds(new Set());
+      setRecentResult(null);
+      setError("");
+    };
     const drafted = (event: Event) => {
       // Invalidate older list requests synchronously so they cannot overwrite
       // drafts delivered by the chat response.
       requestSequence.current++;
       const drafts = (event as CustomEvent<CalendarProposal[]>).detail;
+      setReplyProposalIds(new Set((drafts ?? []).map((draft) => draft.id)));
       if (drafts?.length) {
         const ids = new Set(drafts.map((draft) => draft.id));
         setProposals((values) => [...drafts, ...values.filter((value) => !ids.has(value.id))]);
@@ -174,9 +182,11 @@ export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
       refresh();
     };
     window.addEventListener("calendar-updated", refresh);
+    window.addEventListener("calendar-chat-started", started);
     window.addEventListener("calendar-drafted", drafted);
     return () => {
       window.removeEventListener("calendar-updated", refresh);
+      window.removeEventListener("calendar-chat-started", started);
       window.removeEventListener("calendar-drafted", drafted);
     };
   }, []);
@@ -190,7 +200,9 @@ export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
   }, [refreshKey, revision]);
 
   const recentId = recentResult?.refreshKey === refreshKey ? recentResult.id : null;
-  const activeProposals = proposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved" || proposal.id === recentId);
+  const replyProposals = proposals.filter((proposal) => replyProposalIds === null || replyProposalIds.has(proposal.id));
+  const needsReview = replyProposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved");
+  const activeProposals = needsReview.length ? needsReview : proposals.filter((proposal) => proposal.id === recentId);
   const update = (updated: CalendarProposal) => {
     requestSequence.current++;
     setProposals((values) => values.map((value) => value.id === updated.id ? updated : value));

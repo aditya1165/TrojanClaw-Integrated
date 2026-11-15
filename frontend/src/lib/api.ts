@@ -144,6 +144,7 @@ export async function chatEndpointFetch(
   _input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  window.dispatchEvent(new Event("calendar-chat-started"));
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: {

@@ -267,6 +267,30 @@ def test_chat_tool_only_drafts_and_has_no_approval_tool(service, embedding_failu
     service.request.assert_not_called()
 
 
+def test_repeated_tool_calls_cannot_create_multiple_cards_for_one_confirmation(service):
+    model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
+    documents.search.return_value = []
+    event = draft()
+
+    def respond(messages, prompt, tools, call):
+        first = call("propose_calendar_event", event.model_dump(mode="json"))
+        duplicate = call("propose_calendar_event", event.model_dump(mode="json"))
+        assert str(next(iter(service.repository.rows))) in first
+        assert "already has a review card" in duplicate
+        other = event.model_copy(update={"start": event.start + timedelta(hours=4), "end": event.end + timedelta(hours=4)})
+        with pytest.raises(AppError, match="already created"):
+            call("propose_calendar_event", other.model_dump(mode="json"))
+        return "I've prepared new calendar proposals."
+
+    model.respond_with_tools.side_effect = respond
+    result = ChatService(None, embeddings, documents, model, calendar=service).chat(
+        ChatRequest(messages=[{"role": "user", "content": "yes"}]), user_id=USER,
+    )
+    assert len(result.calendar_proposals) == len(service.repository.rows) == 1
+    assert "a new calendar proposal" in result.response
+    service.request.assert_not_called()
+
+
 def test_selected_connectors_and_calendar_drafts_work_together_for_the_signed_in_account(service, monkeypatch):
     connectors = MagicMock()
     connectors.tools.return_value = [{"name": "brightspace__courses"}]
@@ -294,7 +318,8 @@ def test_selected_connectors_and_calendar_drafts_work_together_for_the_signed_in
 def test_followup_recovers_missing_draft_call_and_returns_a_new_approval_card(service):
     model, embeddings, documents = MagicMock(), MagicMock(), MagicMock()
     documents.search.return_value = []
-    first_event = draft()
+    base = draft().start.replace(hour=16, minute=0)
+    first_event = draft().model_copy(update={"start": base, "end": base + timedelta(hours=1)})
     second_event = first_event.model_copy(update={
         "start": first_event.start + timedelta(hours=4),
         "end": first_event.start + timedelta(hours=5, minutes=30),
@@ -329,6 +354,53 @@ def test_followup_recovers_missing_draft_call_and_returns_a_new_approval_card(se
     assert new.event.end == second_event.end
     assert service.repository.rows[old.id]["status"] == "applied"
     assert "Approve addition" in second.response
+    service.request.assert_not_called()
+
+
+@pytest.mark.parametrize("request_text", ["a skating event at 3pm to 3.20pm also", "a skating event at 3:00 PM–3:20 PM also"])
+def test_old_event_times_are_rejected_before_saving_and_corrected_in_same_turn(service, request_text):
+    model, documents = MagicMock(), MagicMock()
+    documents.search.return_value = []
+    base = draft().start.replace(hour=8, minute=0)
+    old = draft().model_copy(update={"title": "Skateboarding", "start": base, "end": base + timedelta(minutes=15)})
+    corrected = old.model_copy(update={"title": "Skating", "start": base.replace(hour=15), "end": base.replace(hour=15, minute=20)})
+
+    def respond(messages, prompt, tools, call):
+        with pytest.raises(AppError, match="latest user message"):
+            call("propose_calendar_event", old.model_dump(mode="json"))
+        assert service.repository.rows == {}
+        call("propose_calendar_event", corrected.model_dump(mode="json"))
+        return "Review the skating event."
+
+    model.respond_with_tools.side_effect = respond
+    result = ChatService(None, MagicMock(), documents, model, calendar=service).chat(
+        ChatRequest(messages=[{"role": "user", "content": "Skateboarding tomorrow at 8am to 8.15am"},
+                              {"role": "assistant", "content": "Review the event below."},
+                              {"role": "user", "content": request_text}]), user_id=USER,
+    )
+    assert len(result.calendar_proposals) == len(service.repository.rows) == 1
+    assert result.calendar_proposals[0].event == corrected
+    service.request.assert_not_called()
+
+
+def test_repeated_wrong_times_cannot_be_claimed_as_a_successful_new_draft(service):
+    model, documents = MagicMock(), MagicMock()
+    documents.search.return_value = []
+    base = draft().start.replace(hour=8, minute=0)
+    old = draft().model_copy(update={"start": base, "end": base + timedelta(minutes=15)})
+
+    def respond(messages, prompt, tools, call, **kwargs):
+        with pytest.raises(AppError):
+            call("propose_calendar_event", old.model_dump(mode="json"))
+        return "All done."
+
+    model.respond_with_tools.side_effect = respond
+    result = ChatService(None, MagicMock(), documents, model, calendar=service).chat(
+        ChatRequest(messages=[{"role": "user", "content": "skating at 3pm to 3.20pm"}]), user_id=USER,
+    )
+    assert "couldn't prepare" in result.response
+    assert result.calendar_proposals == [] and service.repository.rows == {}
+    assert model.respond_with_tools.call_count == 2
     service.request.assert_not_called()
 
 
