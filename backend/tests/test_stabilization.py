@@ -1,7 +1,6 @@
-"""Regression tests for repository parameter adaptation, error mapping and Piazza sync safety."""
+"""Regression tests for repository parameter adaptation and error mapping."""
 
 from contextlib import contextmanager
-from uuid import UUID
 
 import psycopg2
 import pytest
@@ -55,25 +54,13 @@ class FakeDatabase:
         yield Connection()
 
 
-def test_document_search_adapts_uuid_user_id() -> None:
+def test_campus_search_parameters_adapt_and_are_shared_across_users() -> None:
     database = FakeDatabase()
-    results = DocumentRepository(database).search(
-        embedding=[0.1, 0.2],
-        user_id=UUID("00000000-0000-0000-0000-000000000001"),
-    )
+    results = DocumentRepository(database).search(embedding=[0.1, 0.2])
     assert len(results) == 1
-    assert database.log[1][1][1] == "00000000-0000-0000-0000-000000000001"
-
-
-def test_document_search_supports_shared_campus_schema_and_caches_detection():
-    database = FakeDatabase(per_user=False)
-    repository = DocumentRepository(database)
-    for _ in range(2):
-        assert repository.search(embedding=[0.1, 0.2], user_id=UUID(int=2))
-    assert sum("information_schema.columns" in query for query, _ in database.log) == 1
-    searches = [(query, parameters) for query, parameters in database.log if "FROM public.documents" in query]
-    assert all("user_id = %s" not in query for query, _ in searches)
-    assert all(parameters == ["[0.1,0.2]", "[0.1,0.2]", 8] for _, parameters in searches)
+    query, parameters = database.log[0]
+    assert "user_id" not in query  # campus pages are shared by every student
+    assert parameters == ["[0.1,0.2]", "[0.1,0.2]", 8]
 
 
 @pytest.mark.parametrize(

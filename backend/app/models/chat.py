@@ -32,7 +32,7 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     messages: list[ChatMessage] = Field(min_length=1, max_length=100)
-    connectors: list[str] = Field(default_factory=list, max_length=2)
+    connectors: list[str] = Field(default_factory=list, max_length=3)
     timezone: str = Field(default="America/Los_Angeles", max_length=100)
 
     @field_validator("timezone")
@@ -47,8 +47,8 @@ class ChatRequest(BaseModel):
     @field_validator("connectors")
     @classmethod
     def supported_connectors(cls, value: list[str]) -> list[str]:
-        if any(provider not in {"brightspace", "handshake"} for provider in value):
-            raise ValueError("Only Brightspace and Handshake are available.")
+        if any(provider not in {"brightspace", "handshake", "piazza"} for provider in value):
+            raise ValueError("Only Brightspace, Handshake and Piazza are available.")
         return list(dict.fromkeys(value))
 
     @model_validator(mode="after")
@@ -58,13 +58,32 @@ class ChatRequest(BaseModel):
         return self
 
 
+class Source(BaseModel):
+    """Where part of an answer came from (a deadline, post, announcement or web page)."""
+
+    title: str
+    url: str | None = None
+    course: str | None = None
+    kind: str | None = None
+
+
+class ChatResponse(BaseModel):
+    response: str
+    sources: list[Source] = Field(default_factory=list)
+    # Calendar drafts made during this reply; each needs the student's Approve click.
+    calendar_proposals: list[CalendarProposal] = Field(default_factory=list)
+    # The saved chat this reply belongs to, and its title (set by POST /chat).
+    conversation_id: UUID | None = None
+    title: str | None = None
+
+
 class ChatTurn(BaseModel):
     """What the browser sends: one new message. Earlier messages come from the saved chat."""
     model_config = ConfigDict(extra="forbid")
 
     conversation_id: UUID | None = None  # None starts a new chat
     message: str = Field(min_length=1, max_length=20_000)
-    connectors: list[str] = Field(default_factory=list, max_length=2)
+    connectors: list[str] = Field(default_factory=list, max_length=3)
     timezone: str = Field(default="America/Los_Angeles", max_length=100)
 
     @field_validator("message")
@@ -74,20 +93,15 @@ class ChatTurn(BaseModel):
             raise ValueError("Message content cannot be blank.")
         return value.strip()
 
+    @field_validator("connectors")
+    @classmethod
+    def supported_connectors(cls, value: list[str]) -> list[str]:
+        return ChatRequest.supported_connectors(value)
 
-class Source(BaseModel):
-    """A link under a reply. url is None when the reply only names the source it checked."""
-    label: str
-    url: str | None = None
-    provider: str
-
-
-class ChatResponse(BaseModel):
-    response: str
-    calendar_proposals: list[CalendarProposal] = Field(default_factory=list)
-    sources: list[Source] = Field(default_factory=list)
-    conversation_id: UUID | None = None
-    title: str | None = None
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        return ChatRequest.valid_timezone(value)
 
 
 class ConversationSummary(BaseModel):

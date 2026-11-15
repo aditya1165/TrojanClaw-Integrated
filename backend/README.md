@@ -11,11 +11,13 @@ OAuth callback URIs and mandatory event approval, are documented in
 ```text
 backend/
 ├── app/
+│   ├── agent/               # Claude agent runtime (tool runner, streaming)
 │   ├── api/routes/          # HTTP-only request handling
 │   ├── integrations/        # Piazza and Brightspace MCP boundaries
+│   ├── mcp_server/          # TrojanClaw MCP tools, built per student
 │   ├── models/              # Validated API and domain models
 │   ├── repositories/        # PostgreSQL access
-│   ├── services/            # Chat, embeddings, prompts, and LLM use cases
+│   ├── services/            # Chat, calendar, embeddings, sources and activity text
 │   ├── config.py            # Typed environment configuration
 │   ├── database.py          # Lazy bounded connection pool
 │   ├── dependencies.py      # Dependency wiring
@@ -27,9 +29,9 @@ backend/
 └── README.md
 ```
 
-The application supports username/password accounts. Chat searches are scoped to
-the signed-in account, never the seeded demo user. Existing ingestion commands
-still use `SINGLE_USER_ID`; their historical rows are not reassigned to new accounts.
+The application supports username/password accounts. Chat runs the agent for the
+signed-in account: course tools read only that account's rows, while campus search
+and EngageSC events are shared public data. See `TrojanClaw_v2_Architecture_and_Spec.md` (§2.0, §5.9).
 Account authentication is separate from extension linking.
 
 ## EngageSC public events
@@ -60,8 +62,8 @@ Authenticated endpoints:
 - `POST /integrations/engagesc/disconnect`: unlink only the current account.
 - `GET /integrations/engagesc/events?days=30&search=&limit=30`: public cached events.
 
-The copilot receives a limited selection of up to 30 events in the next 30 days
-when the account is linked. **View events** supports broader searches. Linking
+When the account is linked, the chat agent can call its `list_campus_events` tool
+(keyword search, up to 90 days ahead). **View events** in the sidebar does the same. Linking
 does not copy another account's extension settings or private academic data.
 Set `RUN_ENGAGESC_DB_TESTS=1` when running pytest to exercise the live feed,
 database persistence, search, and account isolation with temporary accounts.
@@ -240,12 +242,13 @@ The liveness response is:
 
 ## API Docs
 
-`GET /integrations` lists Piazza (unavailable), Brightspace, and Handshake.
+`GET /integrations` lists Brightspace, Handshake and Piazza.
 Local-only `POST /integrations/{provider}/connect` opens a persistent Chromium
 sign-in window in a background job; poll the list for the result.
 `POST /integrations/{provider}/verify` checks the saved session through MCP.
-`POST /chat` accepts `connectors: ["brightspace", "handshake"]` to enable
-read-only live tool use (this computer only). See [CONNECTORS.md](../CONNECTORS.md) for setup.
+`POST /chat` runs the agent; its `connectors` list (`brightspace`, `handshake`,
+`piazza`) is the sources turned on in chat, which limits the saved sessions the
+agent may use (this computer only). See [CONNECTORS.md](../CONNECTORS.md) for setup.
 
 ### Chats
 

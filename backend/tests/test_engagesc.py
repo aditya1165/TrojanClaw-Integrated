@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from app.main import app
-from app.models.events import CampusEventList
+from app.models.events import CampusEvent, CampusEventList
 from app.services import engagesc
 from app.services.engagesc import EngageSCService, get_engagesc_service, parse_public_calendar
 from app.errors import DependencyUnavailableError
@@ -144,21 +144,40 @@ def test_events_require_linked_account():
     repository.list_events.assert_not_called()
 
 
-def test_copilot_uses_event_context_for_the_authenticated_user():
-    from app.models.chat import ChatRequest
-    from app.services.chat import ChatService
+def test_agent_event_tool_is_scoped_to_the_signed_in_account():
+    import asyncio
+    import json
+    from types import SimpleNamespace
 
-    documents = MagicMock()
-    documents.search.return_value = []
-    language_model = MagicMock()
-    language_model.respond.return_value = "Here are public events."
+    from mcp import Client
+
+    from app.agent.config import RetrievalConfig
+    from app.mcp_server.server import build_mcp_server
+
     campus = MagicMock()
-    campus.prompt_context.return_value = "Public EngageSC event: Robotics workshop"
-    service = ChatService(None, MagicMock(), documents, language_model, campus)
-    service.chat(ChatRequest(messages=[{"role": "user", "content": "Any upcoming campus events?"}]), user_id=UUID(int=2))
-    campus.prompt_context.assert_called_once_with(UUID(int=2))
-    assert "Robotics workshop" in language_model.respond.call_args.args[1]
-    assert documents.search.call_args.kwargs["user_id"] == UUID(int=2)
+    campus.repository.is_linked.side_effect = lambda user_id: user_id == UUID(int=2)
+    campus.events.return_value = CampusEventList(events=[CampusEvent(
+        external_key="e1", title="Robotics workshop", starts_at=NOW + timedelta(days=1),
+        url="https://engage.usc.edu/event/1",
+    )], fetched_at=NOW)
+
+    async def call(user_id):
+        server = build_mcp_server(
+            user_id=user_id, embeddings=MagicMock(), documents=MagicMock(), student_data=MagicMock(),
+            retrieval=RetrievalConfig(min_similarity=0.6, per_source_limit=2), campus_events=campus,
+        )
+        async with Client(server) as client:
+            result = await client.call_tool(name="list_campus_events", arguments={"search": "robotics", "days_ahead": 7})
+            return json.loads(result.content[0].text)
+
+    linked = asyncio.run(call(UUID(int=2)))
+    assert linked["events"][0]["title"] == "Robotics workshop"
+    assert linked["sources"][0]["kind"] == "campus_event"
+    campus.events.assert_called_once_with(UUID(int=2), 7, "robotics", 20)
+
+    other = asyncio.run(call(UUID(int=3)))  # a different student who has not linked EngageSC
+    assert other["events"] == [] and "EngageSC" in other["note"]
+    assert campus.events.call_count == 1
 
 
 def test_routes_require_login():

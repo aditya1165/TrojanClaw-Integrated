@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 import pytest
 
-from app.dependencies import get_chat_service, get_conversation_repository, get_language_model
+from app.dependencies import get_chat_service, get_conversation_repository
 from app.errors import AppError
 from app.main import app
 from app.models.chat import ChatResponse
@@ -72,9 +72,16 @@ class FakeConversations:
 
 class FakeChatService:
     def __init__(self, fail=False):
-        self.requests, self.fail = [], fail
+        self.requests, self.fail, self.title_fails = [], fail, False
 
-    def chat(self, request, *, user_id, conversation_id=None, emit=None):
+    async def title(self, question, answer):
+        if self.title_fails:
+            raise RuntimeError("no title today")
+        return "Midterm study plan"
+
+    async def chat(self, request, *, user_id, use_saved_connectors=False, conversation_id=None, emit=None,
+                   allowed_connectors=None):
+        self.allowed = allowed_connectors
         emit({"type": "activity", "text": "Checking Brightspace: upcoming due dates"})
         if self.fail:
             raise AppError("The model is unavailable.", "llm_down", 503)
@@ -82,17 +89,7 @@ class FakeChatService:
         answer = f"Answer {len(self.requests)}"
         for word in answer.split(" "):
             emit({"type": "text", "text": word})
-        return ChatResponse(response=answer, sources=[{"label": "ASN-04", "url": "https://brightspace.usc.edu/x", "provider": "brightspace"}])
-
-
-class FakeTitles:
-    def __init__(self, fail=False):
-        self.fail = fail
-
-    def title(self, question, answer):
-        if self.fail:
-            raise RuntimeError("no title today")
-        return "Midterm study plan"
+        return ChatResponse(response=answer, sources=[{"title": "ASN-04", "url": "https://brightspace.usc.edu/x", "kind": "connector"}])
 
 
 def send(client, body):
@@ -118,12 +115,11 @@ def wait_for(check):
 
 @pytest.fixture
 def setup():
-    state = {"repo": FakeConversations(), "service": FakeChatService(), "titles": FakeTitles()}
+    state = {"repo": FakeConversations(), "service": FakeChatService()}
     app.dependency_overrides[get_conversation_repository] = lambda: state["repo"]
     app.dependency_overrides[get_chat_service] = lambda: state["service"]
-    app.dependency_overrides[get_language_model] = lambda: state["titles"]
     yield state
-    for dependency in (get_conversation_repository, get_chat_service, get_language_model):
+    for dependency in (get_conversation_repository, get_chat_service):
         app.dependency_overrides.pop(dependency, None)
 
 
@@ -141,13 +137,14 @@ def test_first_message_creates_a_chat_and_later_messages_get_its_history(setup):
         assert second["conversation_id"] == chat_id
         listed = client.get("/conversations").json()
         history = client.get(f"/conversations/{chat_id}/messages").json()
+    assert setup["service"].allowed == []  # the sources turned on in chat limit the saved connectors
     request, used_chat = setup["service"].requests[1]
     assert str(used_chat) == chat_id
     assert [(m.role.value, m.content) for m in request.messages] == [
         ("user", "When is my CSCI 270 midterm?"), ("assistant", "Answer 1"), ("user", "Make a study plan")]
     assert [item["title"] for item in listed] == ["Midterm study plan"]  # AI title replaced the first line
     assert [m["content"] for m in history] == ["When is my CSCI 270 midterm?", "Answer 1", "Make a study plan", "Answer 2"]
-    assert history[1]["sources"][0]["label"] == "ASN-04"  # links are saved with the reply
+    assert history[1]["sources"][0]["title"] == "ASN-04"  # links are saved with the reply
 
 
 def test_someone_elses_chat_cannot_be_read_continued_renamed_or_deleted(setup):
@@ -171,7 +168,7 @@ def test_failed_first_reply_leaves_no_empty_chat(setup):
 
 
 def test_title_failure_keeps_the_first_line_title(setup):
-    setup["titles"].fail = True
+    setup["service"].title_fails = True
     long_message = "Can you help me figure out " + "which classes " * 10
     with TestClient(app) as client:
         done(client, {"message": long_message})

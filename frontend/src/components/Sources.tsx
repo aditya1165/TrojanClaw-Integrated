@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConnectorProvider } from "../lib/api";
-import { activeSources, INFO, usable, USC, type Sources, type State } from "../lib/sources";
+import { activeSources, INFO, LIVE, usable, USC, type Sources, type State } from "../lib/sources";
 import { EventsDialog } from "../EngageSCPanel";
 import { Button, CloseIcon, LockIcon } from "./ui";
 
@@ -80,7 +80,7 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
       {open && (
         <div className="absolute bottom-full left-0 z-20 mb-2 flex w-80 max-w-[calc(100vw-3rem)] flex-col rounded-2xl border border-line bg-surface p-2 shadow-xl">
           <p className="px-3 py-2 text-xs font-semibold text-muted">Use in chat</p>
-          {USC.map((provider) => {
+          {LIVE.map((provider) => {
             const state = sources.stateOf(provider);
             return usable(state) ? (
               <label key={provider} className={`${ROW} cursor-pointer hover:bg-subtle`}>
@@ -107,7 +107,6 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
               {!sources.calendar?.connected && <button type="button" className={LINK} onClick={manage}>Connect</button>}
             </MenuRow>
           </div>
-          <div className={ROW}><MenuRow id="piazza" note="Coming soon" /></div>
           {sources.error && <p role="alert" className="px-3 py-2 text-xs text-error">{sources.error}</p>}
           <div className="mt-1 border-t border-line pt-1">
             <button type="button" onClick={manage} className="flex min-h-11 w-full items-center rounded-xl px-3 text-[13px] text-muted hover:bg-subtle hover:text-fg">
@@ -154,44 +153,11 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
 
         <h3 className="text-xs font-semibold tracking-[0.06em] text-muted uppercase">Connected with your USC login</h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          {USC.map((provider) => {
-            const state = sources.stateOf(provider);
-            const message = sources.messageOf(provider);
-            const waiting = state === "connecting" || sources.busy.includes(provider);
-            return (
-              <article key={provider} className="flex flex-col gap-3 rounded-2xl border border-line p-4">
-                <div className="flex items-center gap-3">
-                  <Tile id={provider} />
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <strong className="text-[15px] font-semibold">{INFO[provider].name}</strong>
-                    <Status state={state} />
-                  </div>
-                </div>
-                <p className="text-[13px] leading-snug text-muted">{INFO[provider].about}</p>
-                {message && state !== "connected" && <p className="text-xs break-words text-muted">{message}</p>}
-                {usable(state) ? (
-                  <>
-                    <label className="flex min-h-8 cursor-pointer items-center justify-between text-[13px]">
-                      Use in chat
-                      <input type="checkbox" className={CHECK} checked={selected.includes(provider)}
-                        onChange={(event) => onChange(event.target.checked
-                          ? [...selected.filter((item) => item !== provider), provider]
-                          : selected.filter((item) => item !== provider))} />
-                    </label>
-                    <div className="flex flex-wrap gap-x-4">
-                      <button type="button" className={LINK} disabled={waiting} onClick={() => void sources.connect(provider, "verify")}>Check session</button>
-                      <button type="button" className={LINK} disabled={waiting} onClick={() => void sources.connect(provider, "connect")}>Sign in again</button>
-                    </div>
-                  </>
-                ) : (
-                  <Button variant="secondary" disabled={waiting || !sources.connectors} onClick={() => void sources.connect(provider, "connect")}>
-                    {waiting ? "Signing in…" : state === "needs_login" ? "Sign in again" : "Connect"}
-                  </Button>
-                )}
-              </article>
-            );
-          })}
+          {USC.map((provider) => <ConnectorCard key={provider} provider={provider} sources={sources} selected={selected} onChange={onChange} />)}
         </div>
+
+        <h3 className="mt-1 text-xs font-semibold tracking-[0.06em] text-muted uppercase">Separate sign-in</h3>
+        <ConnectorCard provider="piazza" sources={sources} selected={selected} onChange={onChange} />
 
         <h3 className="mt-1 text-xs font-semibold tracking-[0.06em] text-muted uppercase">More sources</h3>
         <div className="flex flex-col divide-y divide-line rounded-2xl border border-line">
@@ -224,14 +190,6 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
               {engage ? "Turn off" : "Turn on"}
             </button>
           </div>
-          <div className="flex items-center gap-3 px-4 py-3">
-            <Tile id="piazza" />
-            <div className="flex flex-1 flex-col gap-0.5">
-              <strong className="text-sm font-semibold">{INFO.piazza.name}</strong>
-              <span className="text-xs text-muted">{INFO.piazza.about}</span>
-            </div>
-            <span className="rounded-full bg-subtle px-2.5 py-1 text-xs text-muted">Coming soon</span>
-          </div>
         </div>
 
         {sources.error && <p role="alert" className="text-sm text-error">{sources.error}</p>}
@@ -246,5 +204,49 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
       </section>
       {showEvents && <EventsDialog onClose={() => setShowEvents(false)} />}
     </div>
+  );
+}
+
+/** One live connector: status, Connect or Sign in again, Check session, and Use in chat. */
+function ConnectorCard({ provider, sources, selected, onChange }: {
+  provider: ConnectorProvider;
+  sources: Sources;
+  selected: ConnectorProvider[];
+  onChange: (providers: ConnectorProvider[]) => void;
+}) {
+  const state = sources.stateOf(provider);
+  const message = sources.messageOf(provider);
+  const waiting = state === "connecting" || sources.busy.includes(provider);
+  return (
+    <article className="flex flex-col gap-3 rounded-2xl border border-line p-4">
+      <div className="flex items-center gap-3">
+        <Tile id={provider} />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <strong className="text-[15px] font-semibold">{INFO[provider].name}</strong>
+          <Status state={state} />
+        </div>
+      </div>
+      <p className="text-[13px] leading-snug text-muted">{INFO[provider].about}</p>
+      {message && state !== "connected" && <p className="text-xs break-words text-muted">{message}</p>}
+      {usable(state) ? (
+        <>
+          <label className="flex min-h-8 cursor-pointer items-center justify-between text-[13px]">
+            Use in chat
+            <input type="checkbox" className={CHECK} checked={selected.includes(provider)}
+              onChange={(event) => onChange(event.target.checked
+                ? [...selected.filter((item) => item !== provider), provider]
+                : selected.filter((item) => item !== provider))} />
+          </label>
+          <div className="flex flex-wrap gap-x-4">
+            <button type="button" className={LINK} disabled={waiting} onClick={() => void sources.connect(provider, "verify")}>Check session</button>
+            <button type="button" className={LINK} disabled={waiting} onClick={() => void sources.connect(provider, "connect")}>Sign in again</button>
+          </div>
+        </>
+      ) : (
+        <Button variant="secondary" disabled={waiting || !sources.connectors} onClick={() => void sources.connect(provider, "connect")}>
+          {waiting ? "Signing in…" : state === "needs_login" ? "Sign in again" : "Connect"}
+        </Button>
+      )}
+    </article>
   );
 }

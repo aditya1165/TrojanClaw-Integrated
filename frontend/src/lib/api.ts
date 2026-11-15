@@ -7,11 +7,12 @@ export interface ConversationSummary {
   pinned: boolean;
 }
 
-/** A link under a reply; url is null when the reply only names the source it checked. */
+/** Where part of a reply came from: a deadline, post, announcement, event, page or connector. */
 export interface Source {
-  label: string;
+  title: string;
   url: string | null;
-  provider: string;
+  course: string | null;
+  kind: string | null;
 }
 
 export interface ConversationMessage {

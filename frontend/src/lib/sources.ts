@@ -8,11 +8,12 @@ export type State = ConnectorStatus["state"];
 export const INFO: Record<ConnectorProvider | "calendar" | "engagesc", { name: string; initial: string; tile: string; about: string }> = {
   brightspace: { name: "Brightspace", initial: "B", tile: "bg-[#2b5f8a]", about: "Courses, assignments, grades and announcements." },
   handshake: { name: "Handshake", initial: "H", tile: "bg-[#1f7a4d]", about: "Jobs, internships and career events." },
-  piazza: { name: "Piazza", initial: "P", tile: "bg-[#8a8580]", about: "Class Q&A threads." },
+  piazza: { name: "Piazza", initial: "P", tile: "bg-[#3e6fb0]", about: "Class Q&A threads. Signs in separately, not with your USC login." },
   calendar: { name: "Google Calendar", initial: "G", tile: "bg-[#5c5752]", about: "Add events to your calendar after you approve them." },
   engagesc: { name: "EngageSC", initial: "E", tile: "bg-[#990000]", about: "Public USC campus events. No sign-in needed." },
 };
-export const USC: ConnectorProvider[] = ["brightspace", "handshake"];
+export const USC: ConnectorProvider[] = ["brightspace", "handshake"]; // connected by Sign in with USC
+export const LIVE: ConnectorProvider[] = ["brightspace", "handshake", "piazza"]; // usable in chat
 
 export const usable = (state?: State) => state === "connected" || state === "saved";
 
@@ -79,7 +80,7 @@ export function useSources(selected: ConnectorProvider[], onChange: (providers: 
   return {
     connectors, engage, calendar, error, busy,
     stateOf: (provider: ConnectorProvider): State =>
-      connectors?.find((item) => item.provider === provider)?.state ?? (provider === "piazza" ? "unavailable" : "not_configured"),
+      connectors?.find((item) => item.provider === provider)?.state ?? "not_configured",
     messageOf: (provider: ConnectorProvider) => connectors?.find((item) => item.provider === provider)?.message ?? null,
     connect: (provider: ConnectorProvider, action: "connect" | "verify") => run(provider, async () => {
       await connectProvider(provider, action);
@@ -106,7 +107,7 @@ export type Sources = ReturnType<typeof useSources>;
 
 /** Names of the sources the next message will use. */
 export function activeSources(sources: Sources, selected: ConnectorProvider[]): string[] {
-  const names = USC.filter((provider) => selected.includes(provider) && usable(sources.stateOf(provider))).map((provider) => INFO[provider].name);
+  const names = LIVE.filter((provider) => selected.includes(provider) && usable(sources.stateOf(provider))).map((provider) => INFO[provider].name);
   if (sources.engage) names.push(INFO.engagesc.name);
   if (sources.calendar?.connected) names.push(INFO.calendar.name);
   return names;

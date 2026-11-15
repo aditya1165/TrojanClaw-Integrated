@@ -15,7 +15,7 @@ const SOURCES = [
   { name: "Handshake", reads: "Jobs, internships, career events", change: "No" },
   { name: "EngageSC", reads: "Public USC campus events", change: "No" },
   { name: "Google Calendar", reads: "Your calendar, to add events", change: "Only events you approve" },
-  { name: "Piazza (coming soon)", reads: "Class Q&A threads", change: "No" },
+  { name: "Piazza (separate sign-in)", reads: "Class Q&A threads", change: "No" },
 ];
 
 const QUESTIONS = [

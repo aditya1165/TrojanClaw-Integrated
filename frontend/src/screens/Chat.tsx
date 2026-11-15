@@ -7,7 +7,7 @@ import {
 import type { AccountProfile, ChatSaved, ConnectorProvider, ConversationSummary, Source } from "../lib/api";
 import { fromSaved, useChatStream, type ChatItem } from "../lib/chatStream";
 import { effectiveTimezone, useSettings } from "../lib/settings";
-import { activeSources, INFO, useSources, USC, type Sources } from "../lib/sources";
+import { activeSources, INFO, LIVE, useSources, type Sources } from "../lib/sources";
 import { toast } from "../lib/toast";
 import { CalendarProposals } from "../components/Calendar";
 import ChatList from "../components/ChatList";
@@ -380,22 +380,21 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
   );
 }
 
-/** Links the reply cited, or the sources it checked. */
+/** Where the reply came from: links it relied on, or the connectors it checked. */
 function SourceChips({ sources }: { sources: Source[] }) {
+  const chip = "inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted";
   return (
     <ul aria-label="Sources" className="flex flex-wrap gap-2">
-      {sources.map((source) => {
-        const provider = source.provider in INFO ? INFO[source.provider as keyof typeof INFO].name : source.provider === "usc" ? "USC" : source.provider;
-        const text = source.url ? `${provider} · ${source.label}` : `Checked ${source.label}`;
-        const chip = "inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted";
+      {sources.slice(0, 8).map((source) => {
+        const text = source.course ? `${source.course} · ${source.title}` : source.title;
         return (
-          <li key={`${source.provider}-${source.url ?? source.label}`} className="max-w-full">
+          <li key={`${source.title}-${source.url ?? ""}`} className="max-w-full">
             {source.url ? (
               <a href={source.url} target="_blank" rel="noopener noreferrer" className={`${chip} hover:text-fg`}>
                 <span className="max-w-[18rem] truncate">{text}</span>
                 <ExternalIcon />
               </a>
-            ) : <span className={chip}>{text}</span>}
+            ) : <span className={chip}><span className="max-w-[18rem] truncate">{text}</span></span>}
           </li>
         );
       })}
@@ -406,7 +405,7 @@ function SourceChips({ sources }: { sources: Source[] }) {
 /** Shown when USC signs you out of a source, until you reconnect or dismiss it. */
 function ReconnectBanner({ sources }: { sources: Sources }) {
   const [dismissed, setDismissed] = useState<ConnectorProvider[]>([]);
-  const signedOut = USC.filter((provider) => sources.stateOf(provider) === "needs_login" && !dismissed.includes(provider));
+  const signedOut = LIVE.filter((provider) => sources.stateOf(provider) === "needs_login" && !dismissed.includes(provider));
   if (!signedOut.length) return null;
   const names = signedOut.map((provider) => INFO[provider].name).join(" and ");
 

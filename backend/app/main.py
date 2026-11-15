@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 import anthropic
-import openai
+from google.genai import errors as genai_errors
 import psycopg2
 
 from app.api.routes import auth, chat, conversations, health, integrations, engagesc, calendar, google_auth
@@ -74,9 +74,9 @@ def create_app() -> FastAPI:
         logger.exception("Database error on %s", request.url.path)
         return _error(503, "dependency_unavailable", "The database is temporarily unavailable.")
 
-    @application.exception_handler(openai.OpenAIError)
-    async def openai_error_handler(request: Request, exc: openai.OpenAIError) -> JSONResponse:
-        logger.exception("OpenAI error on %s", request.url.path)
+    @application.exception_handler(genai_errors.APIError)
+    async def embedding_error_handler(request: Request, exc: genai_errors.APIError) -> JSONResponse:
+        logger.exception("Gemini embedding error on %s", request.url.path)
         return _error(502, "upstream_error", "The embedding provider failed. Please try again.")
 
     @application.exception_handler(anthropic.AnthropicError)

@@ -5,7 +5,7 @@ import type { Theme } from "../theme";
 import { Button, CloseIcon } from "./ui";
 
 const SHORTCUTS: [string, string][] = [["⌘ K", "New chat"], ["⌘ /", "Type a message"], ["⌘ ⇧ F", "Search chats"], ["Esc", "Close a window"]];
-const SOURCES: [ConnectorProvider, string][] = [["brightspace", "Brightspace"], ["handshake", "Handshake"]];
+const SOURCES: [ConnectorProvider, string][] = [["brightspace", "Brightspace"], ["handshake", "Handshake"], ["piazza", "Piazza"]];
 
 interface SettingsDialogProps {
   account: AccountProfile;

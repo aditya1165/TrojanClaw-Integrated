@@ -5,7 +5,7 @@ An AI academic copilot for USC students, built on Claude, MCP, FastAPI, React an
 ## What it does
 
 - **Sign in with USC**: one USC login (password + Duo) signs the student in and connects Brightspace and Handshake automatically. **Continue with USC Google** also connects Google Calendar. Username and password accounts still work. Details: [CONNECTORS.md](CONNECTORS.md).
-- **Chat** with live, read-only answers from Brightspace and Handshake, plus public USC campus events (EngageSC) and USC documents.
+- **Chat** runs one Claude agent (`config/agent.yaml`, `prompts/ai_instructions.md`) with live, read-only tools for Brightspace, Handshake and Piazza, plus TrojanClaw's own tools for deadlines, announcements, course materials, USC documents and public campus events (EngageSC). Piazza has its own sign-in; see [docs/piazza.md](docs/piazza.md).
   - Replies stream in word by word. While TrojanClaw looks something up, a status line shows what it is checking, for example "Checking Brightspace: upcoming due dates".
   - Links the reply relied on appear as chips under it, such as "Brightspace · ASN-04". A link is shown only if a tool returned it and the reply cites it.
 - **Multiple chats**, like Claude: saved per account, each with its own address (`/chat/<id>`), an AI-written title, search, pin, rename and delete.
@@ -33,6 +33,7 @@ An AI academic copilot for USC students, built on Claude, MCP, FastAPI, React an
 | `frontend/` | React 19 + Vite + TypeScript + Tailwind v4 |
 | `integrations/handshake/` | Connector helper (Brightspace + Handshake MCP, Python 3.12+) |
 | `integrations/google-calendar/` | Google Calendar MCP gateway (Node 22.12+) |
+| `integrations/piazza/` | Account-scoped Piazza MCP and persistent Chromium sign-in (Python 3.12+) |
 | `supabase/migrations/` | Database schema |
 | `docs/` | Integration notes |
 

@@ -8,7 +8,7 @@ export interface Settings {
 }
 
 const KEY = "tc-settings";
-const DEFAULTS: Settings = { timezone: "", defaultSources: ["brightspace", "handshake"] };
+const DEFAULTS: Settings = { timezone: "", defaultSources: ["brightspace", "handshake", "piazza"] };
 
 export function readSettings(): Settings {
   try {

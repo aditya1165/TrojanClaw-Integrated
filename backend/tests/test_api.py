@@ -3,9 +3,7 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 import pytest
 
-from app.dependencies import get_chat_service
 from app.main import app
-from app.models.chat import ChatResponse
 
 
 client = TestClient(app)
