@@ -10,11 +10,12 @@
 
 This README's feature list describes the original hackathon build. The backend has since been refactored into a single-user API (`backend/app/api`, `services`, `repositories`), and the current behavior differs:
 
-- `POST /chat` is retrieval-augmented chat over the `documents` table with Claude Haiku (`claude-haiku-4-5-20251001`). It does not call any tools yet.
+- `POST /chat` uses Claude Haiku (`claude-haiku-4-5-20251001`). With selected connectors it calls read-only Brightspace and Handshake MCP tools; without them it searches the `documents` table.
 - The old library booking, dining and Google-search tools (and the unused `routers/` and `rag/` modules) have been removed.
 - The hard-coded dining and deadline seed scripts have been removed. Deadlines will come from Brightspace.
 - The placeholder USC sign-in, profile form, one-click task buttons, file picker and old Piazza ingest script (and its `piazza_data` table) have been removed. Piazza and Brightspace now come from MCP servers (see `piazza.md` and `brightspace.md`).
 - Answers do not include citations yet.
+- The main chat has Brightspace and Handshake connector cards with separate persistent Chromium sessions; Piazza is a disabled placeholder. See [CONNECTORS.md](CONNECTORS.md) for local setup and use.
 
 The plan to integrate Piazza and Brightspace is in `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md`; read its §15 addendum first.
 

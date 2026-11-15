@@ -1,5 +1,10 @@
 # Brightspace integration
 
+The main chat now has a **Connect** button that opens a persistent Chromium
+profile for USC Brightspace and automatically saves its session for the MCP
+server. Use [CONNECTORS.md](CONNECTORS.md) for this workflow. The manual cookie
+steps below document the earlier standalone prototype.
+
 TrojanClaw reads Brightspace through **[brightspace-mcp-server](https://github.com/RohanMuppa/brightspace-mcp-server)** (npm, MIT). It is a read-only MCP server that runs locally over stdio and points at `https://brightspace.usc.edu`.
 
 ## Why this server
@@ -111,4 +116,4 @@ Tool results are JSON inside text blocks. The server may add extra "update notic
 
 ## Status
 
-- 2026-11-14: Cookie sign-in verified. Key read tools return data for CSCI 599 and CSCI 566. The integration is not yet wired into the backend.
+- 2026-11-14: Standalone cookie sign-in verified on CSCI 599 and CSCI 566. Main-chat MCP tool use and a separate persistent Chromium profile are now implemented; the new browser login still needs verification with the student's USC account.

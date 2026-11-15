@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import type { FormEvent } from "react";
@@ -6,6 +6,8 @@ import type { KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { API_BASE_URL, chatEndpointFetch } from "./lib/api";
+import type { ConnectorProvider } from "./lib/api";
+import { Connectors } from "./components/Connectors";
 import "./App.css";
 
 const publicIcons = [
@@ -29,6 +31,7 @@ const getMessageText = (message: UIMessage): string => {
 
 function App() {
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
+  const [selectedConnectors, setSelectedConnectors] = useState<ConnectorProvider[]>([]);
 
   const {
     messages,
@@ -43,6 +46,7 @@ function App() {
     api: `${API_BASE_URL}/chat`,
     streamProtocol: "text",
     experimental_prepareRequestBody: ({ messages: uiMessages }) => ({
+      connectors: selectedConnectors,
       messages: uiMessages
         .map((message) => ({
           role: message.role === "assistant" ? "assistant" : "user",
@@ -160,6 +164,8 @@ function App() {
             </div>
           )}
 
+          <Connectors selected={selectedConnectors} onChange={setSelectedConnectors} />
+
           <form className="prompt-card" onSubmit={handlePromptSubmit}>
             <label htmlFor="prompt" className="sr-only">
               Enter your prompt
@@ -192,7 +198,7 @@ function App() {
 
           {isLoading && (
             <p className="loading-indicator" role="status" aria-live="polite">
-              TrojanClaw is searching USC sources...
+              {selectedConnectors.length ? "TrojanClaw is reading your connected sources…" : "TrojanClaw is searching USC sources…"}
             </p>
           )}
 

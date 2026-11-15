@@ -163,6 +163,13 @@ The liveness response is:
 
 ## API Docs
 
+`GET /integrations` lists Piazza (unavailable), Brightspace, and Handshake.
+Local-only `POST /integrations/{provider}/connect` opens a persistent Chromium
+sign-in window in a background job; poll the list for the result.
+`POST /integrations/{provider}/verify` checks the saved session through MCP.
+`POST /chat` accepts `connectors: ["brightspace", "handshake"]` to enable
+read-only live tool use. See [CONNECTORS.md](../CONNECTORS.md) for setup.
+
 FastAPI auto-generates interactive docs:
 
 - Swagger UI: `http://127.0.0.1:8000/docs`

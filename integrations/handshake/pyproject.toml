@@ -1,0 +1,22 @@
+[project]
+name = "trojanclaw-handshake"
+version = "0.1.0"
+description = "Local read-only Handshake MCP connector for TrojanClaw"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastmcp==3.0.2",
+    "handshake-mcp @ git+https://github.com/shahparam11/handshake-mcp-server.git@c61800020a4ddcf9e41b1526d0a29154c3781c9a",
+]
+
+[project.scripts]
+trojanclaw-handshake = "trojanclaw_handshake:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[dependency-groups]
+dev = ["pytest==8.3.5"]

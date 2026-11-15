@@ -7,6 +7,7 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   messages: ChatMessage[];
+  connectors?: string[];
 }
 
 export interface ChatResponse {
@@ -15,6 +16,29 @@ export interface ChatResponse {
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+export type ConnectorProvider = "piazza" | "brightspace" | "handshake";
+export interface ConnectorStatus {
+  provider: ConnectorProvider;
+  state: "not_configured" | "configured" | "saved" | "connecting" | "connected" | "needs_login" | "unavailable";
+  message?: string | null;
+}
+
+export async function getConnectors(): Promise<ConnectorStatus[]> {
+  const response = await fetch(`${API_BASE_URL}/integrations`);
+  if (!response.ok) throw new Error("Could not load connectors.");
+  return response.json() as Promise<ConnectorStatus[]>;
+}
+
+export async function connectProvider(provider: ConnectorProvider, action: "connect" | "verify"): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/integrations/${provider}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    const body = await response.json() as { detail?: string };
+    throw new Error(body.detail ?? "Could not connect. Please try again.");
+  }
+}
 
 export async function sendChatMessage(
   request: ChatRequest,

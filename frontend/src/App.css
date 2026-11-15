@@ -1,5 +1,24 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap");
 
+.connectors-panel { width: 100%; margin: 0 0 20px; }
+.connectors-heading { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 12px; }
+.connectors-heading span, .connector-note { color: var(--muted); font-size: .8rem; }
+.connector-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.connector-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-strong); }
+.connector-title { display: flex; justify-content: space-between; align-items: center; }
+.connector-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.connected .connector-dot { background: var(--accent-2); }
+.connecting .connector-dot, .saved .connector-dot { background: var(--accent); }
+.connector-card p { color: var(--muted); margin: 8px 0 12px; font-size: .8rem; }
+.connector-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.connector-actions button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface-soft); cursor: pointer; font: inherit; font-size: .75rem; }
+.connector-actions button:disabled, .connector-toggle:has(input:disabled) { opacity: .5; cursor: default; }
+.connector-toggle { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: .8rem; }
+.connector-toggle input { accent-color: var(--accent-2); }
+.connector-card small { display: block; margin-top: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.connector-note { line-height: 1.5; margin: 10px 0 0; }
+@media (max-width: 640px) { .connector-grid { grid-template-columns: 1fr; } }
+
 :root {
   --bg: #0f141b;
   --bg-2: #141c26;

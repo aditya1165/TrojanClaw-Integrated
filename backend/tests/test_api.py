@@ -24,7 +24,19 @@ def test_integrations_are_visible_without_being_configured() -> None:
     response = client.get("/integrations")
     assert response.status_code == 200
     providers = {item["provider"] for item in response.json()}
-    assert providers == {"piazza", "brightspace"}
+    assert providers == {"piazza", "brightspace", "handshake"}
+
+
+def test_handshake_status_uses_local_transport() -> None:
+    from app.integrations.local import LocalConnectors
+
+    service = LocalConnectors()
+    try:
+        handshake = next(item for item in service.statuses() if item.provider == "handshake")
+        assert handshake.transport == "stdio"
+        assert handshake.state in {"saved", "not_configured"}
+    finally:
+        service._jobs.shutdown(wait=True)
 
 
 def test_chat_rejects_empty_messages() -> None:

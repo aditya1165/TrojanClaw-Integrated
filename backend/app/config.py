@@ -58,8 +58,6 @@ class Settings:
     anthropic_model: str
     single_user_id: UUID
     single_user_name: str
-    piazza_mcp_url: str | None
-    brightspace_mcp_url: str | None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -95,8 +93,6 @@ class Settings:
             ).strip(),
             single_user_id=user_id,
             single_user_name=os.getenv("SINGLE_USER_NAME", "TrojanClaw User").strip(),
-            piazza_mcp_url=_optional("PIAZZA_MCP_URL"),
-            brightspace_mcp_url=_optional("BRIGHTSPACE_MCP_URL"),
         )
         settings.validate()
         return settings
