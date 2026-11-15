@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { authRequest, type AccountProfile } from "./lib/api";
+import { CloseIcon } from "./components/ui";
 
 interface AuthDialogProps {
   onClose: () => void;
   onSubmit: (profile: AccountProfile) => void;
+  initialMode?: "login" | "register";
 }
 
-export default function AuthDialog({ onClose, onSubmit }: AuthDialogProps) {
+export default function AuthDialog({ onClose, onSubmit, initialMode = "login" }: AuthDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(initialMode === "register");
   const [passwordError, setPasswordError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -52,7 +54,7 @@ export default function AuthDialog({ onClose, onSubmit }: AuthDialogProps) {
   return (
     <dialog ref={dialogRef} className="auth-dialog" aria-labelledby="auth-title" onCancel={(event) => { if (isSubmitting) event.preventDefault(); else onClose(); }}>
       <button type="button" disabled={isSubmitting} className="auth-close" aria-label="Close sign-in" onClick={onClose}>
-        <span className="material-symbols-outlined" aria-hidden="true">close</span>
+        <CloseIcon />
       </button>
       <div className="auth-brand">
         <img src="/logo.png" alt="" />

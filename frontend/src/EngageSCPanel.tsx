@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "./lib/api";
+import { CalendarIcon, CloseIcon } from "./components/ui";
 
 interface CampusEvent {
   external_key: string;
@@ -60,7 +61,7 @@ function EventsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <dialog ref={dialogRef} className="events-dialog" onCancel={onClose} aria-labelledby="events-title">
-      <button className="auth-close" aria-label="Close events" onClick={onClose}><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
+      <button className="auth-close" aria-label="Close events" onClick={onClose}><CloseIcon /></button>
       <h2 id="events-title">Explore EngageSC</h2>
       <p className="events-subtitle">Public campus events · Times in Los Angeles</p>
       <form className="events-search" onSubmit={handleSearch}>
@@ -127,9 +128,9 @@ export default function EngageSCPanel({ signedIn, onSignIn }: { signedIn: boolea
   };
 
   return (
-    <div className="p-3 rounded-lg bg-surface-container-low border border-surface-container-high/60">
-      <div className="flex items-center gap-2 text-sm font-medium"><span className="material-symbols-outlined text-primary text-[18px]" aria-hidden="true">groups</span>EngageSC</div>
-      <p className="mt-1 text-[11px] text-on-surface-variant">{connected ? "Public events linked" : "Public campus events · No USC login"}</p>
+    <div className="rounded-xl border border-line bg-surface p-4">
+      <div className="flex items-center gap-2 text-sm font-medium"><CalendarIcon />EngageSC</div>
+      <p className="mt-1 text-xs text-muted">{connected ? "Public events linked" : "Public campus events · No USC login"}</p>
       <div className="mt-2 flex items-center gap-3">
         {connected ? <>
           <button className="events-link-button" onClick={() => setShowEvents(true)}>View events</button>
