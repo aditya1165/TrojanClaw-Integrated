@@ -11,6 +11,7 @@ import json
 import re
 from typing import Any
 from uuid import UUID
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from anthropic.lib.tools import ToolError, beta_async_tool
@@ -109,9 +110,10 @@ class ChatService:
         rejected: list[str] = []  # drafts refused because their times didn't match the latest message
         latest = request.messages[-1].content
         lock = asyncio.Lock()
+        calendar_links: set[str] = set()  # event links the calendar read returned (for reply cards)
         calendar_tools = [
             _propose_tool(calendar, user_id, latest, proposals, rejected, lock, conversation_id, emit),
-            _list_tool(calendar, user_id, request.timezone, emit),
+            _list_tool(calendar, user_id, request.timezone, emit, calendar_links),
             _update_tool(calendar, user_id, request.timezone, latest, proposals, rejected, lock, conversation_id, emit),
         ] if calendar else []
         webreg = _webreg_tool(user_id, emit)
@@ -129,6 +131,7 @@ class ChatService:
             timezone=request.timezone,
             extra_tools=calendar_tools + other_tools,
             extra_instructions=CALENDAR_ON if calendar else CALENDAR_OFF,
+            extra_links=calendar_links,
             **streaming,
         )
         text = result.text
@@ -155,28 +158,47 @@ class ChatService:
                 )
 
         if proposals:
-            event = proposals[0].event
-            zone = ZoneInfo(event.timezone)
-            start = event.start.astimezone(zone).strftime("%b %d, %Y, %I:%M %p")
-            end = event.end.astimezone(zone).strftime("%b %d, %Y, %I:%M %p")
-            text = (
-                f"I've prepared a new calendar proposal: {event.title}, {start} – {end} ({event.timezone}). "
-                + ("Review the before/after details and choose Approve changes to update the existing event."
-                   if proposals[0].operation == "update" else "Review the event below and choose Approve addition to save it.")
-            )
-            if event.recurrence:
-                recurrence = event.recurrence
-                text += f" Repeats {recurrence.frequency.lower()}, every {recurrence.interval} interval(s)"
-                if recurrence.weekdays:
-                    text += " on " + ", ".join(recurrence.weekdays)
-                text += (f", {recurrence.count} occurrences." if recurrence.count else f", through {recurrence.until.isoformat()}.")
-            if event.reminder_minutes is not None:
-                text += f" Popup reminder: {event.reminder_minutes} minutes before start."
+            text = draft_reply(proposals[0])
         return ChatResponse(
             response=text,
             sources=[Source(**source) for source in result.sources],
             calendar_proposals=proposals,
         )
+
+
+_WEEKDAYS = {"MO": "Mon", "TU": "Tue", "WE": "Wed", "TH": "Thu", "FR": "Fri", "SA": "Sat", "SU": "Sun"}
+
+
+def _when(event: CalendarEventDraft) -> str:
+    """'Mon, Nov 16, 3:00 – 3:20 PM PST' (one date when start and end are on the same day)."""
+    zone = ZoneInfo(event.timezone)
+    start, end = event.start.astimezone(zone), event.end.astimezone(zone)
+
+    def clock(value: datetime) -> str:
+        return f"{value.hour % 12 or 12}:{value:%M %p}"
+
+    day = f"{start:%a, %b} {start.day}"
+    if start.date() == end.date():
+        first = clock(start).removesuffix(f" {start:%p}") if f"{start:%p}" == f"{end:%p}" else clock(start)
+        return f"{day}, {first} – {clock(end)} {end:%Z}"
+    return f"{day}, {clock(start)} – {end:%a, %b} {end.day}, {clock(end)} {end:%Z}"
+
+
+def draft_reply(proposal: CalendarProposal) -> str:
+    """The reply that goes with a draft card: the essentials, and what the student does next."""
+    event = proposal.event
+    if proposal.operation == "update":
+        return (f"I've prepared the changes to **{event.title}**: {_when(event)}. Review the before and after below, "
+                "then choose **Approve changes** to update it in Google Calendar.")
+    repeats = ""
+    if rule := event.recurrence:
+        unit = {"DAILY": "day", "WEEKLY": "week", "MONTHLY": "month"}[rule.frequency]
+        repeats = f" Repeats {rule.frequency.lower()}" if rule.interval == 1 else f" Repeats every {rule.interval} {unit}s"
+        if rule.weekdays:
+            repeats += " on " + ", ".join(_WEEKDAYS.get(day, day) for day in rule.weekdays)
+        repeats += f", {rule.count} times." if rule.count else (f", until {rule.until:%b} {rule.until.day}." if rule.until else ".")
+    return (f"I've prepared a new calendar proposal for **{event.title}** on {_when(event)}.{repeats} "
+            "Review it below and choose **Approve addition** to add it to Google Calendar. Nothing changes until you approve.")
 
 
 def _propose_tool(
@@ -227,7 +249,8 @@ def _propose_tool(
 
 
 def _list_tool(calendar: GoogleCalendar, user_id: UUID, timezone: str,
-               emit: Callable[[dict[str, Any]], None] | None = None) -> Any:
+               emit: Callable[[dict[str, Any]], None] | None = None, links: set[str] | None = None) -> Any:
+    """Reads the student's calendar. Event links it returns go into `links`, so reply cards may use them."""
     async def read(**arguments: Any) -> str:
         if emit:
             emit({"type": "activity", "text": activity_for(LIST_EVENTS_TOOL["name"])})
@@ -238,6 +261,8 @@ def _list_tool(calendar: GoogleCalendar, user_id: UUID, timezone: str,
             raise ToolError("Use a timezone-aware start and end up to 31 days apart, or omit both for the next seven days.") from None
         except AppError as exc:
             raise ToolError(exc.message) from None
+        if links is not None:
+            links.update(event["url"] for event in data.get("events") or [] if isinstance(event.get("url"), str))
         return json.dumps(data)
 
     return beta_async_tool(read, name=LIST_EVENTS_TOOL["name"], description=LIST_EVENTS_TOOL["description"],

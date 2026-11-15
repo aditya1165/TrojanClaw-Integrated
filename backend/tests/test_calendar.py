@@ -450,7 +450,7 @@ def test_old_event_times_are_rejected_before_saving_and_corrected_in_same_turn(s
                                      {"role": "user", "content": request_text}])
     assert len(result.calendar_proposals) == len(service.repository.rows) == 1
     assert result.calendar_proposals[0].event == corrected
-    assert "Skating" in result.response and "03:20 PM" in result.response
+    assert "**Skating**" in result.response and "3:00 – 3:20 PM" in result.response
     assert len(runtime.calls) == 1  # corrected in the same turn, no retry
     service.request.assert_not_called()
 

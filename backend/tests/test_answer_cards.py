@@ -85,3 +85,44 @@ def test_links_survive_a_connector_result_cut_at_the_size_limit():
     whole = {}
     collect_links(json.dumps([{"type": "text", "text": json.dumps({"results": jobs[:2]})}]), "handshake", whole)
     assert whole["https://app.joinhandshake.com/stu/jobs/1"]["title"] == "Job 1"
+
+
+def test_calendar_event_links_from_the_calendar_tool_can_be_used_in_cards():
+    import asyncio
+    from types import SimpleNamespace
+    from uuid import UUID
+    from mcp.server.mcpserver import MCPServer
+    from app.agent.config import load_agent_config
+    from app.agent.runtime import AgentRuntime
+    from app.config import get_settings
+
+    event = "https://calendar.google.com/calendar/event?eid=abc"
+    reply = "```cards\n" + json.dumps({"items": [{"kind": "event", "title": "CSCI 571 lecture", "url": event}]}) + "\n```"
+
+    class Runner:
+        async def until_done(self):
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=reply)], stop_reason="end_turn", model="m")
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(tool_runner=lambda **_: Runner())))
+    runtime = AgentRuntime(load_agent_config(get_settings()), lambda _: MCPServer("test"), "key", client=client)
+    run = lambda links: asyncio.run(runtime.run("chat", [{"role": "user", "content": "my week"}],
+                                               user_id=UUID(int=2), extra_links=links))
+    assert cards(run({event}).text)["items"][0]["url"] == event  # returned by list_calendar_events
+    assert "url" not in cards(run(set()).text)["items"][0]  # not returned by any tool
+
+
+def test_draft_replies_are_short_and_read_naturally():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from types import SimpleNamespace
+    from app.models.calendar import CalendarEventDraft
+    from app.services.chat import draft_reply
+
+    pt = ZoneInfo("America/Los_Angeles")
+    same_day = CalendarEventDraft(title="Study block", start=datetime(2030, 11, 18, 15, 0, tzinfo=pt),
+                                  end=datetime(2030, 11, 18, 15, 20, tzinfo=pt), timezone="America/Los_Angeles")
+    text = draft_reply(SimpleNamespace(event=same_day, operation="create"))
+    assert "**Study block** on Mon, Nov 18, 3:00 – 3:20 PM PST." in text and "**Approve addition**" in text
+    across = same_day.model_copy(update={"start": datetime(2030, 11, 18, 11, 30, tzinfo=pt), "end": datetime(2030, 11, 18, 13, 0, tzinfo=pt)})
+    assert "11:30 AM – 1:00 PM PST" in draft_reply(SimpleNamespace(event=across, operation="create"))
+    assert "**Approve changes**" in draft_reply(SimpleNamespace(event=same_day, operation="update"))
