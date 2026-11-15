@@ -4,10 +4,13 @@ An AI academic copilot for USC students, built on Claude, MCP, FastAPI, React an
 
 ## Current focus
 
-Connecting **Brightspace** and **Piazza** through read-only MCP servers:
+**Sign in with USC**: one USC login (password + Duo) signs the student in and connects Brightspace and Handshake automatically. Setup, design and endpoints: [CONNECTORS.md](CONNECTORS.md).
 
-- [docs/brightspace.md](docs/brightspace.md): `brightspace-mcp-server@5.2.3`, cookie sign-in, tool allowlist
-- [docs/piazza.md](docs/piazza.md): `mcp-piazza`, login methods, tool allowlist
+Connector notes:
+
+- [docs/brightspace.md](docs/brightspace.md): `brightspace-mcp-server@5.2.3`, sign-in, tool allowlist
+- [handshake.md](handshake.md): Handshake MCP connector and allowlist
+- [docs/piazza.md](docs/piazza.md): `mcp-piazza`, login methods, tool allowlist (Piazza cannot use the USC login)
 
 ## Layout
 
@@ -15,6 +18,7 @@ Connecting **Brightspace** and **Piazza** through read-only MCP servers:
 | :--- | :--- |
 | `backend/` | FastAPI app (Python 3.11) |
 | `frontend/` | React 19 + Vite + TypeScript |
+| `integrations/handshake/` | Connector helper (Brightspace + Handshake MCP, Python 3.12+) |
 | `supabase/migrations/` | Database schema |
 | `docs/` | Integration notes |
 

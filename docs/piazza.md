@@ -78,3 +78,4 @@ Courses can be referred to by ID, by course number (`CSCI 566`), or by part of t
 ## Status
 
 - 2026-11-14: Login verified and `list_courses` returns the owner's courses. The integration is not yet wired into the backend.
+- 2026-11-14: Piazza cannot use the USC login. Piazza's school SSO page (`https://piazza.com/sso`) lists only four schools, and USC is not one of them, so Sign in with USC cannot connect Piazza. It needs its own login (password, browser session, or cookie).

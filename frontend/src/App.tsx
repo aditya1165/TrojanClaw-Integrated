@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTheme } from "./theme";
 import { ApiError, authRequest, type AccountProfile, type ConnectorProvider } from "./lib/api";
 import AuthDialog from "./AuthDialog";
+import SetupScreen from "./components/SetupScreen";
 import Landing from "./screens/Landing";
 import Connect from "./screens/Connect";
 import Chat from "./screens/Chat";
@@ -20,6 +21,8 @@ export default function App() {
   const [afterAuth, setAfterAuth] = useState<Screen>("connect");
   const [notice, setNotice] = useState("");
   const [selectedConnectors, setSelectedConnectors] = useState<ConnectorProvider[]>([]);
+  // After Sign in with USC the backend connects sources in the background; show its progress.
+  const [settingUp, setSettingUp] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
@@ -97,13 +100,19 @@ export default function App() {
           onCreateAccount={() => openScreen("connect", "register")} />
       )}
       {showAuth && <AuthDialog key={authMode} initialMode={authMode} onClose={() => setShowAuth(false)}
-        onSubmit={(profile) => {
+        onSubmit={(profile, viaUsc) => {
           setSelectedConnectors([]);
           setAccount(profile);
           setShowAuth(false);
           setNotice("");
           setScreen(afterAuth);
+          setSettingUp(viaUsc);
         }} />}
+      {settingUp && <SetupScreen onDone={(connected) => {
+        setSettingUp(false);
+        setSelectedConnectors(connected);
+        setScreen("chat");
+      }} />}
     </>
   );
 }

@@ -47,6 +47,12 @@ export interface AccountProfile {
   username: string;
 }
 
+export interface UscLoginStatus {
+  status: "waiting" | "failed" | "done";
+  detail?: string | null;
+  account?: AccountProfile | null;
+}
+
 export class ApiError extends Error {
   status: number;
 

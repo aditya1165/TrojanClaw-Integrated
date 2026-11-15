@@ -117,3 +117,4 @@ Tool results are JSON inside text blocks. The server may add extra "update notic
 ## Status
 
 - 2026-11-14: Standalone cookie sign-in verified on CSCI 599 and CSCI 566. Main-chat MCP tool use and a separate persistent Chromium profile are now implemented; the new browser login still needs verification with the student's USC account.
+- 2026-11-14: Sign in with USC (see [CONNECTORS.md](../CONNECTORS.md)) replaces copying cookies by hand: one USC login in a Chrome popup saves the Brightspace session automatically. A scripted USC login with `get_my_courses` returned 3 courses. Brightspace's USC login goes through Microsoft to USC Shibboleth, the same login Handshake uses.

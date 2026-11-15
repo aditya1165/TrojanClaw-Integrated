@@ -3,6 +3,9 @@
 from functools import lru_cache
 import hashlib
 import hmac
+import json
+import logging
+import re
 import secrets
 from uuid import uuid4
 
@@ -13,6 +16,7 @@ from app.database import Database, get_database
 from app.models.auth import AccountProfile, RegisterRequest
 
 
+logger = logging.getLogger(__name__)
 SESSION_SECONDS = 60 * 60 * 24 * 7
 COOKIE_NAME = "trojanclaw_session"
 
@@ -43,6 +47,13 @@ def token_hash(token: str) -> str:
 @lru_cache(maxsize=1)
 def _dummy_hash() -> str:
     return hash_password(secrets.token_urlsafe(32))
+
+
+def usc_usernames(unique_name: str, brightspace_id: str) -> list[str]:
+    """Username candidates for a new USC account: the USC username first, then one from the Brightspace ID."""
+    base = re.sub(r"[^a-z0-9_]", "_", unique_name.split("@")[0].lower())[:32]
+    fallback = f"usc_{re.sub(r'[^a-z0-9_]', '_', brightspace_id.lower())}"[:32]
+    return [name for name in (base, fallback) if len(name) >= 3]
 
 
 def _profile(row: tuple) -> AccountProfile:
@@ -98,6 +109,50 @@ class AuthService:
         with self.database.connection() as connection:
             with connection.cursor() as cursor:
                 token = self._new_session(cursor, str(row[0]), old_token)
+        return _profile(row), token
+
+    def usc_sign_in(self, whoami: dict, old_token: str | None) -> tuple[AccountProfile, str]:
+        """Sign in (creating the account on first use) from Brightspace's whoami after a USC login.
+
+        USC accounts are matched only by Brightspace user ID, never by username, so a USC login
+        can never take over a username/password account.
+        """
+        brightspace_id = str(whoami.get("Identifier") or "").strip()
+        unique_name = str(whoami.get("UniqueName") or "").strip()
+        if not brightspace_id:
+            raise HTTPException(502, "Brightspace did not say who logged in.")
+        name = " ".join(str(part) for part in (whoami.get("FirstName"), whoami.get("LastName")) if part).strip()
+        name = (name or unique_name or "USC student")[:100]
+
+        with self.database.connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, display_name, username FROM public.app_users WHERE profile->'usc'->>'brightspace_user_id' = %s",
+                    (brightspace_id,),
+                )
+                row = cursor.fetchone()
+
+        if row is None:
+            profile = json.dumps({"usc": {"brightspace_user_id": brightspace_id, "unique_name": unique_name}})
+            for username in usc_usernames(unique_name, brightspace_id):
+                try:
+                    with self.database.connection() as connection:
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                "INSERT INTO public.app_users (id, display_name, username, profile) VALUES (%s, %s, %s, %s::jsonb) RETURNING id, display_name, username",
+                                (str(uuid4()), name, username, profile),
+                            )
+                            row = cursor.fetchone()
+                    break
+                except UniqueViolation:
+                    continue  # username taken by another account; try the next one
+            if row is None:
+                raise HTTPException(409, "Could not create an account for this USC login.")
+
+        with self.database.connection() as connection:
+            with connection.cursor() as cursor:
+                token = self._new_session(cursor, str(row[0]), old_token)
+        logger.info("USC login: signed in as TrojanClaw user %s", row[2])
         return _profile(row), token
 
     def current_user(self, token: str | None) -> AccountProfile:

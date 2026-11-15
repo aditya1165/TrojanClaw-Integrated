@@ -90,7 +90,7 @@ export function Connectors({ selected, onChange }: {
         </article>;
       })}
     </div>
-    <p className="connector-note">Connect opens a Chromium window on this computer. Complete your school sign-in there. Selected sources are read only.</p>
+    <p className="connector-note">Sign in with USC connects Brightspace and Handshake automatically. Connect opens a sign-in window on this computer for anything that still needs it. Selected sources are read only.</p>
     {error && <p className="error-text" role="alert">{error}</p>}
   </section>;
 }

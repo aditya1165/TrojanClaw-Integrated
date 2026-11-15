@@ -91,6 +91,11 @@ class LocalConnectors:
             self._states[provider] = (IntegrationState.connecting, "Finish signing in in the Chromium window.")
             self._jobs.submit(self._finish_connection, provider)
 
+    def set_state(self, provider: str, state: IntegrationState, message: str | None = None) -> None:
+        """Record progress made outside a Connect click (the setup after Sign in with USC)."""
+        with self._lock:
+            self._states[provider] = (state, message)
+
     def _finish_connection(self, provider: str) -> None:
         try:
             self._run(provider, "connect")
