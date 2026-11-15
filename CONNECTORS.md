@@ -68,18 +68,22 @@ After an app restart, cards with stored session data show **Session saved**. Cli
 
 Default base directory: `~/.trojanclaw/connectors` (Windows: `%USERPROFILE%\.trojanclaw\connectors`). Set `TROJANCLAW_SESSION_DIR` to change it; a blank value uses the default. Use an absolute path and the same value when launching the backend or a standalone connector.
 
+Each TrojanClaw account has its own folder, named by its account ID. Connector routes and chat only ever use the signed-in account's folder, so one account can never use another account's sessions. Signing out keeps the account's sessions; signing in again reuses them.
+
 ```text
 connectors/
-  brightspace/
-    profile/          # Persistent Chromium state
-    cookies.json      # Automatically captured after reaching the USC dashboard
-  handshake/
-    profile/          # Upstream persistent Chromium state
-    cookies.json      # Upstream automatically captured session
-    origin.json       # Authenticated Handshake school address used by MCP
+  users/
+    <account id>/
+      brightspace/
+        profile/          # Persistent Chromium state (Connect button)
+        cookies.json      # Captured after reaching the USC dashboard
+      handshake/
+        profile/          # Upstream persistent Chromium state (Connect button)
+        cookies.json      # Captured Handshake session
+        origin.json       # Authenticated Handshake school address used by MCP
 ```
 
-Sign in with USC writes the same files: `brightspace/cookies.json`, and `handshake/cookies.json` plus `handshake/origin.json`. It uses an in-memory browser context, so it creates no profile folder and keeps no USC login cookies.
+The backend passes the helper only that account's folders (`TROJANCLAW_SESSION_DIR` and `HANDSHAKE_DIR`), so the helper itself needs no account logic. Sign in with USC writes the same files into the signing-in account's folder. It uses an in-memory browser context, so it creates no profile folder and keeps no USC login cookies.
 
 There is no shared cookie file and no manual cookie import. Brightspace receives only its own two session cookies through the child process environment (`D2L_SESSION_COOKIE`); Handshake reads only its own session directory. Cookies and browser profiles never pass through the frontend or HTTP API. Tool results are sent to Anthropic to answer selected-source questions; they are not written to the campus knowledge database.
 
@@ -89,7 +93,7 @@ Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read 
 
 - `POST /auth/usc/start`: opens the Sign in with USC popup; optional body `{"left", "top"}` places it. Returns a one-time `attempt_id`.
 - `POST /auth/usc/status` with `{"attempt_id"}`: `waiting`, `failed`, or `done` (sets the session cookie). A finished attempt can be read once.
-- `GET /integrations`: status of the three cards.
+- `GET /integrations`: status of the signed-in account's three cards. All `/integrations` routes require a signed-in account.
 - `POST /integrations/{provider}/connect`: starts a login job, returns 202, then the UI polls status.
 - `POST /integrations/{provider}/verify`: checks a saved session.
 - `POST /chat`: accepts optional `connectors: ["brightspace", "handshake"]` and runs a bounded read-only tool loop.
@@ -107,8 +111,11 @@ Automated tests use fake account responses and browser contexts. A real USC/Hand
 Developer tools for testing the USC login outside the app (run from `backend/`):
 
 ```sh
-python -m app.connectors.usc_login   # one USC login in a Chrome window; prints who logged in
-uv run --no-project --with "mcp>=1.10,<2" --with keyring python app/connectors/check.py   # calls each MCP server once
+python -m app.connectors.usc_login   # one USC login on Brightspace in a Chrome window; prints who logged in
+uv run --no-project --with "mcp>=1.10,<2" --with keyring python app/connectors/check.py   # calls the Brightspace MCP server once
+python -m app.connectors.ip_check    # does the saved Brightspace session work from this network?
 ```
+
+`ip_check` answers a hosting question: a server can only use students' sessions if USC does not tie a session to the network it was created on. Save a session on your usual network, then run `ip_check` again from another network (for example a phone hotspot).
 
 Sign-in progress is logged in the backend terminal as `USC login: ...` and `USC setup: ...` lines.

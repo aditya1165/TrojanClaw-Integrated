@@ -33,7 +33,7 @@ class ChatService:
     def chat(self, request: ChatRequest, *, user_id: UUID) -> ChatResponse:
         if request.connectors:
             connectors = get_local_connectors()
-            tools = connectors.tools(request.connectors)
+            tools = connectors.tools(user_id, request.connectors)
             prompt = (
                 "You are TrojanClaw, a concise USC student assistant. Use the selected "
                 "read-only connector tools to answer questions about this student's account. "
@@ -45,7 +45,7 @@ class ChatService:
             )
             answer = self._language_model.respond_with_tools(
                 request.messages, self._with_campus_events(prompt, user_id), tools,
-                lambda name, arguments: connectors.call(name, arguments, request.connectors),
+                lambda name, arguments: connectors.call(user_id, name, arguments, request.connectors),
             )
             return ChatResponse(response=answer)
         latest_query = request.messages[-1].content

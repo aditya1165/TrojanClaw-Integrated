@@ -2,6 +2,10 @@
 
 The newer browser/MCP dependencies run in the connector's isolated environment,
 not the FastAPI environment. No credentials are sent through the HTTP API.
+
+Every TrojanClaw account has its own connector sessions under
+<base>/users/<user_id>/ and its own card states, so one account can never use
+another account's Brightspace or Handshake session.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -11,29 +15,41 @@ import os
 from pathlib import Path
 import subprocess
 from threading import RLock
+from uuid import UUID
 
 from app.config import BACKEND_DIR
 from app.errors import AppError
 from app.integrations.models import IntegrationProvider, IntegrationState, IntegrationStatus
 
 
+def connectors_base() -> Path:
+    """TROJANCLAW_SESSION_DIR, else ~/.trojanclaw/connectors."""
+    configured = os.environ.get("TROJANCLAW_SESSION_DIR", "").strip()
+    return Path(configured or Path.home() / ".trojanclaw" / "connectors").expanduser().resolve()
+
+
+def user_root(user_id: UUID | str) -> Path:
+    """One account's connector folder. The ID is parsed as a UUID, so it can never escape the base folder."""
+    return connectors_base() / "users" / str(UUID(str(user_id)))
+
+
 class LocalConnectors:
     def __init__(self):
         self.project = BACKEND_DIR.parent / "integrations" / "handshake"
-        self.root = Path(os.environ.get("TROJANCLAW_SESSION_DIR", "").strip() or Path.home() / ".trojanclaw" / "connectors").expanduser().resolve()
-        self._states: dict[str, tuple[IntegrationState, str | None]] = {}
+        self._states: dict[tuple[str, str], tuple[IntegrationState, str | None]] = {}
         self._lock = RLock()
         self._jobs = ThreadPoolExecutor(max_workers=2, thread_name_prefix="connector-login")
 
-    def statuses(self) -> list[IntegrationStatus]:
+    def statuses(self, user_id: UUID | str) -> list[IntegrationStatus]:
+        root, user = user_root(user_id), str(user_id)
         results = []
         with self._lock:
             for provider in IntegrationProvider:
                 if provider == IntegrationProvider.piazza:
                     state, message = IntegrationState.unavailable, "Coming soon"
                 else:
-                    saved = (self.root / provider.value / "cookies.json").exists()
-                    state, message = self._states.get(provider.value, (
+                    saved = (root / provider.value / "cookies.json").exists()
+                    state, message = self._states.get((user, provider.value), (
                         IntegrationState.saved if saved else IntegrationState.not_configured, None,
                     ))
                 results.append(IntegrationStatus(provider=provider, state=state,
@@ -44,14 +60,24 @@ class LocalConnectors:
         if provider not in {"handshake", "brightspace"}:
             raise AppError("This connector is coming soon.", "connector_unavailable", 400)
 
-    def _run(self, provider: str, action: str, **payload) -> dict:
+    def _state(self, user_id: UUID | str, provider: str) -> IntegrationState | None:
+        with self._lock:
+            return self._states.get((str(user_id), provider), (None,))[0]
+
+    def set_state(self, user_id: UUID | str, provider: str, state: IntegrationState, message: str | None = None) -> None:
+        with self._lock:
+            self._states[(str(user_id), provider)] = (state, message)
+
+    def _run(self, user_id: UUID | str, provider: str, action: str, **payload) -> dict:
         self._require_provider(provider)
         python = self.project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if not python.exists():
             raise AppError("Install the local connectors first; see the setup guide.", "connector_not_installed", 503)
+        root = user_root(user_id)
         env = os.environ.copy()
-        env.update({"TROJANCLAW_SESSION_DIR": str(self.root),
-                    "HANDSHAKE_DIR": str(self.root / "handshake"),
+        # The helper reads every session only from these two folders: this account's.
+        env.update({"TROJANCLAW_SESSION_DIR": str(root),
+                    "HANDSHAKE_DIR": str(root / "handshake"),
                     "PYTHONIOENCODING": "utf-8"})
         # Also recognize the optional project-local Node installation.
         node_root = BACKEND_DIR.parent / ".runtime"
@@ -83,69 +109,60 @@ class LocalConnectors:
                 "connector_failed", 502,
             ) from None
 
-    def connect(self, provider: str) -> None:
+    def connect(self, user_id: UUID | str, provider: str) -> None:
         self._require_provider(provider)
         with self._lock:
-            if self._states.get(provider, (None,))[0] == IntegrationState.connecting:
+            if self._state(user_id, provider) == IntegrationState.connecting:
                 return
-            self._states[provider] = (IntegrationState.connecting, "Finish signing in in the Chromium window.")
-            self._jobs.submit(self._finish_connection, provider)
+            self.set_state(user_id, provider, IntegrationState.connecting, "Finish signing in in the Chromium window.")
+            self._jobs.submit(self._finish_connection, user_id, provider)
 
-    def set_state(self, provider: str, state: IntegrationState, message: str | None = None) -> None:
-        """Record progress made outside a Connect click (the setup after Sign in with USC)."""
-        with self._lock:
-            self._states[provider] = (state, message)
-
-    def _finish_connection(self, provider: str) -> None:
+    def _finish_connection(self, user_id: UUID | str, provider: str) -> None:
         try:
-            self._run(provider, "connect")
+            self._run(user_id, provider, "connect")
             state = (IntegrationState.connected, None)
         except AppError as exc:
             state = (IntegrationState.needs_login, exc.message)
-        with self._lock:
-            self._states[provider] = state
+        self.set_state(user_id, provider, *state)
 
-    def verify(self, provider: str) -> None:
+    def verify(self, user_id: UUID | str, provider: str) -> None:
         self._require_provider(provider)
-        with self._lock:
-            if self._states.get(provider, (None,))[0] == IntegrationState.connecting:
-                raise AppError("Finish signing in first.", "connector_busy", 409)
-        try:
-            self._run(provider, "verify")
-        except AppError:
-            with self._lock:
-                self._states[provider] = (IntegrationState.needs_login, "Please reconnect.")
-            raise
-        with self._lock:
-            self._states[provider] = (IntegrationState.connected, None)
+        if self._state(user_id, provider) == IntegrationState.connecting:
+            raise AppError("Finish signing in first.", "connector_busy", 409)
+        self.check_session(user_id, provider)
 
-    def tools(self, providers: list[str]) -> list[dict]:
+    def check_session(self, user_id: UUID | str, provider: str) -> None:
+        """Verify a saved session with a read-only call and record the result (no busy check)."""
+        try:
+            self._run(user_id, provider, "verify")
+        except AppError:
+            self.set_state(user_id, provider, IntegrationState.needs_login, "Please reconnect.")
+            raise
+        self.set_state(user_id, provider, IntegrationState.connected)
+
+    def tools(self, user_id: UUID | str, providers: list[str]) -> list[dict]:
         tools = []
         for provider in dict.fromkeys(providers):
             self._require_provider(provider)
-            with self._lock:
-                state = self._states.get(provider, (None,))[0]
-            if state == IntegrationState.connecting:
+            if self._state(user_id, provider) == IntegrationState.connecting:
                 raise AppError("Finish signing in before using this connector.", "connector_busy", 409)
             try:
-                response = self._run(provider, "tools")
+                response = self._run(user_id, provider, "tools")
             except AppError:
-                with self._lock:
-                    self._states[provider] = (IntegrationState.needs_login, "Please reconnect.")
+                self.set_state(user_id, provider, IntegrationState.needs_login, "Please reconnect.")
                 raise
             for tool in response["tools"]:
                 tools.append({**tool, "name": f"{provider}__{tool['name']}"})
         return tools
 
-    def call(self, name: str, arguments: dict, providers: list[str]) -> str:
+    def call(self, user_id: UUID | str, name: str, arguments: dict, providers: list[str]) -> str:
         provider, separator, tool = name.partition("__")
         if not separator or provider not in providers:
             raise AppError("This connector was not selected for chat.", "connector_forbidden", 403)
         try:
-            result = self._run(provider, "call", tool=tool, arguments=arguments)
+            result = self._run(user_id, provider, "call", tool=tool, arguments=arguments)
         except AppError:
-            with self._lock:
-                self._states[provider] = (IntegrationState.needs_login, "Please reconnect.")
+            self.set_state(user_id, provider, IntegrationState.needs_login, "Please reconnect.")
             raise
         return json.dumps(result["content"])[:60000]
 

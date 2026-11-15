@@ -1,18 +1,16 @@
-"""Check that both MCP servers work with the sessions saved by usc_login.py.
+"""Developer test: does the Brightspace MCP server work with the session saved by usc_login.py?
 
 Run from backend/ (uses its own temporary environment, so the backend's packages are untouched):
 
   uv run --no-project --with "mcp>=1.10,<2" --with keyring python app/connectors/check.py
 
-Starts brightspace-mcp-server and mcp-piazza, calls get_my_courses and list_courses,
-and prints how many courses each returned.
+Starts brightspace-mcp-server, calls get_my_courses, and prints how many courses it returned.
 """
 
 import asyncio
 import json
 import os
 import sys
-from pathlib import Path
 
 import keyring
 from mcp import ClientSession, StdioServerParameters
@@ -20,7 +18,6 @@ from mcp.client.stdio import stdio_client
 
 KEYCHAIN_SERVICE = "trojanclaw"
 KEYCHAIN_BRIGHTSPACE = "brightspace_cookie"
-PIAZZA_COOKIE_FILE = Path("~/.config/trojanclaw/piazza-cookies.json").expanduser()
 TIMEOUT_SECONDS = 120
 
 
@@ -81,26 +78,7 @@ async def main() -> int:
             ),
             "get_my_courses",
         )
-
-    if not PIAZZA_COOKIE_FILE.exists():
-        print("Piazza: no saved session. Run: python -m app.connectors.usc_login")
-        piazza_ok = False
-    else:
-        piazza_ok = await check(
-            "Piazza",
-            StdioServerParameters(
-                command="uvx",
-                args=["mcp-piazza", "serve"],
-                env={
-                    **os.environ,
-                    "PIAZZA_KEEP_UNREAD": "true",
-                    "PIAZZA_COOKIE_FILE": str(PIAZZA_COOKIE_FILE),
-                },
-            ),
-            "list_courses",
-        )
-
-    return 0 if brightspace_ok and piazza_ok else 1
+    return 0 if brightspace_ok else 1
 
 
 if __name__ == "__main__":

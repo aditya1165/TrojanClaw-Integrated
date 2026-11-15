@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -34,7 +36,7 @@ def test_handshake_status_uses_local_transport() -> None:
 
     service = LocalConnectors()
     try:
-        handshake = next(item for item in service.statuses() if item.provider == "handshake")
+        handshake = next(item for item in service.statuses(UUID(int=2)) if item.provider == "handshake")
         assert handshake.transport == "stdio"
         assert handshake.state in {"saved", "not_configured"}
     finally:

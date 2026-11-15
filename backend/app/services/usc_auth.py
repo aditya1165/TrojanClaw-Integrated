@@ -18,12 +18,14 @@ import threading
 import time
 from typing import Callable
 from urllib.parse import urlparse
+from uuid import UUID
 
 from fastapi import HTTPException
 
 from app.integrations.local import get_local_connectors
 from app.integrations.models import IntegrationState
 from app.integrations.saved_sessions import save_json
+from app.models.auth import AccountProfile
 
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,8 @@ HANDSHAKE_SIGNED_IN = """async () => {
 }"""
 
 Position = tuple[int, int] | None  # screen position of the popup's top-left corner
-SignedIn = Callable[[dict], None]
+Identify = Callable[[dict], AccountProfile]  # Brightspace whoami -> TrojanClaw account
+Ready = Callable[[], None]                    # the page may sign the account in now
 
 
 def handshake_origin(url: str) -> str | None:
@@ -85,7 +88,7 @@ def _show_popup(page, visible: bool) -> None:
         logger.warning("Could not change the USC sign-in window", exc_info=True)
 
 
-def connect_handshake(page) -> None:
+def connect_handshake(page, user_id: UUID) -> None:
     connectors = get_local_connectors()
     page.goto(HANDSHAKE_SIGN_IN, wait_until="domcontentloaded")
 
@@ -99,16 +102,16 @@ def connect_handshake(page) -> None:
 
     if not _wait(signed_in, SILENT_SECONDS):
         logger.info("USC setup: Handshake needs the student, showing the popup")
-        connectors.set_state("handshake", IntegrationState.connecting, "Finish the USC sign-in in the pop-up.")
+        connectors.set_state(user_id, "handshake", IntegrationState.connecting, "Finish the USC sign-in in the pop-up.")
         _show_popup(page, visible=True)
         if not _wait(signed_in, SITE_SECONDS - SILENT_SECONDS):
             raise TimeoutError("Handshake sign-in was not finished in time.")
         _show_popup(page, visible=False)
 
     origin = handshake_origin(page.url)
-    save_json("handshake", "cookies.json", page.context.cookies([origin]))
-    save_json("handshake", "origin.json", {"origin": origin})
-    connectors.verify("handshake")  # read-only check through the connector; marks it connected
+    save_json(user_id, "handshake", "cookies.json", page.context.cookies([origin]))
+    save_json(user_id, "handshake", "origin.json", {"origin": origin})
+    connectors.check_session(user_id, "handshake")  # read-only check through the connector; marks it connected
     logger.info("USC setup: Handshake connected")
 
 
@@ -116,8 +119,8 @@ def connect_handshake(page) -> None:
 SETUP: dict[str, Callable] = {"handshake": connect_handshake}
 
 
-def browser_login(position: Position, on_signed_in: SignedIn) -> None:
-    """Run the USC sign-in popup, report who signed in, then set up the connectors."""
+def browser_login(position: Position, identify: Identify, ready: Ready) -> None:
+    """Run the USC sign-in popup, find the account, then set up that account's connectors."""
     from playwright.sync_api import sync_playwright
 
     from app.connectors.usc_login import read_whoami, wait_for_brightspace
@@ -136,20 +139,21 @@ def browser_login(position: Position, on_signed_in: SignedIn) -> None:
             if wait_for_brightspace(context, page) is None:
                 raise TimeoutError("The USC login was not finished in time.")
             logger.info("USC login: Brightspace login detected, asking who logged in")
-            whoami = read_whoami(page)
-            save_json("brightspace", "cookies.json", context.cookies(["https://brightspace.usc.edu"]))
-            connectors.set_state("brightspace", IntegrationState.connected)
-            for provider in SETUP:  # before on_signed_in, so "Setting things up" sees them at once
-                connectors.set_state(provider, IntegrationState.connecting, "Setting up…")
-            on_signed_in(whoami)
+            account = identify(read_whoami(page))
+            # Sessions are saved in this account's own folder, so no other account can use them.
+            save_json(account.id, "brightspace", "cookies.json", context.cookies(["https://brightspace.usc.edu"]))
+            connectors.set_state(account.id, "brightspace", IntegrationState.connected)
+            for provider in SETUP:  # before ready(), so "Setting things up" sees them at once
+                connectors.set_state(account.id, provider, IntegrationState.connecting, "Setting up…")
+            ready()
 
             _show_popup(page, visible=False)
             for provider, connect in SETUP.items():
                 try:
-                    connect(page)
+                    connect(page, account.id)
                 except Exception:
                     logger.exception("USC setup: %s could not be connected", provider)
-                    connectors.set_state(provider, IntegrationState.needs_login,
+                    connectors.set_state(account.id, provider, IntegrationState.needs_login,
                                          "Could not connect automatically. Click Connect to try again.")
         finally:
             browser.close()
@@ -158,15 +162,23 @@ def browser_login(position: Position, on_signed_in: SignedIn) -> None:
 @dataclass
 class UscAttempt:
     status: str = "waiting"  # waiting | failed | done
-    whoami: dict | None = None
+    account: AccountProfile | None = None
     started: float = field(default_factory=time.monotonic)
+
+
+def find_usc_account(whoami: dict) -> AccountProfile:
+    from app.services.auth import get_auth_service
+
+    return get_auth_service().find_or_create_usc_account(whoami)
 
 
 class UscLogin:
     """Tracks sign-in popups. Each attempt ID is a secret that only the starting page knows."""
 
-    def __init__(self, run_login: Callable[[Position, SignedIn], None] = browser_login):
+    def __init__(self, run_login: Callable[[Position, Identify, Ready], None] = browser_login,
+                 find_account: Identify = find_usc_account):
         self._run_login = run_login
+        self._find_account = find_account
         self._attempts: dict[str, UscAttempt] = {}
         self._lock = threading.Lock()
 
@@ -185,13 +197,16 @@ class UscLogin:
         return attempt_id
 
     def _run(self, attempt: UscAttempt, position: Position) -> None:
-        def signed_in(whoami: dict) -> None:
-            attempt.whoami = whoami
+        def identify(whoami: dict) -> AccountProfile:
+            attempt.account = self._find_account(whoami)
+            return attempt.account
+
+        def ready() -> None:
             attempt.status = "done"
-            logger.info("USC login: finished, Brightspace user %s", whoami.get("Identifier"))
+            logger.info("USC login: finished, signing in %s", attempt.account.username if attempt.account else None)
 
         try:
-            self._run_login(position, signed_in)
+            self._run_login(position, identify, ready)
         except Exception:
             logger.exception("USC login failed")
             if attempt.status == "waiting":  # a failure during setup does not undo the sign-in
