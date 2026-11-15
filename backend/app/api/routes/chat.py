@@ -62,11 +62,14 @@ async def _attachment_blocks(store: UploadStore, user_id: UUID, new: list[UUID],
     if budget < 0:
         raise HTTPException(413, "These files are too large to send together. Attach fewer files.")
     history_blocks: list[list[dict[str, Any]]] = [[] for _ in history]
+    # Files are re-sent only for one follow-up: the latest earlier question's files. Older ones are
+    # named, not sent, because every file is paid for again on each message and tool round.
+    last_question = max((i for i, item in enumerate(history) if item["role"] == "user"), default=-1)
     for index in range(len(history) - 1, -1, -1):
         for item in history[index].get("attachments") or []:
             size = int(item.get("size") or 0)
             try:
-                if size > budget:
+                if index != last_question or size > budget:
                     raise LookupError
                 upload, data = await asyncio.to_thread(store.read, user_id, UUID(str(item["id"])))
                 history_blocks[index].append(await asyncio.to_thread(content_block, upload, data))

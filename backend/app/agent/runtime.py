@@ -309,8 +309,12 @@ class AgentRuntime:
         context = _now_line(timezone) + "\n" + _connectors_line(providers)
         if extra_instructions:
             context += "\n\n" + extra_instructions
+        # Prompt caching: tools and the fixed instructions are cached (explicit breakpoint), and
+        # the conversation so far is cached by the top-level automatic breakpoint below, so each
+        # tool round and each later message re-reads them at a tenth of the price. The date,
+        # connectors and caller notes change, so they come after the fixed part.
         system = [
-            {"type": "text", "text": self._config.system_prompt},
+            {"type": "text", "text": self._config.system_prompt, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": context},
         ]
         extra: dict[str, Any] = dict(self._config.request_options)
@@ -340,6 +344,7 @@ class AgentRuntime:
                 tools=tools,
                 messages=messages,
                 max_iterations=goal_config.max_tool_rounds,
+                cache_control={"type": "ephemeral"},
                 **extra,
             )
             if on_event is None:
@@ -372,6 +377,15 @@ class AgentRuntime:
         )
 
 
+def _log_usage(message: Any) -> None:
+    """One line per model call, so token use (and cache hits) can be checked in the backend log."""
+    usage = getattr(message, "usage", None)
+    if usage is not None:
+        _LOG.info("Claude call: input=%s cache_read=%s cache_write=%s output=%s",
+                  getattr(usage, "input_tokens", 0), getattr(usage, "cache_read_input_tokens", 0),
+                  getattr(usage, "cache_creation_input_tokens", 0), getattr(usage, "output_tokens", 0))
+
+
 async def _stream(runner: Any, on_event: OnEvent) -> Any:
     """Pass the reply's text on as it is written; return the last message."""
     async for stream in runner:
@@ -381,6 +395,7 @@ async def _stream(runner: Any, on_event: OnEvent) -> Any:
                 wrote = True
                 on_event({"type": "text", "text": event.delta.text})
         message = await stream.get_final_message()
+        _log_usage(message)
         if wrote and any(getattr(block, "type", None) == "tool_use" for block in message.content):
             on_event({"type": "reset"})  # that text led into tool calls; the answer comes next
     return await runner.until_done()

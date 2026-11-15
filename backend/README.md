@@ -254,7 +254,7 @@ agent may use (this computer only). See [CONNECTORS.md](../CONNECTORS.md) for se
 
 Each account has many saved chats (`public.conversations` and
 `public.conversation_messages`). The server keeps the history: `POST /chat`
-takes `{conversation_id, message, connectors, timezone}`, loads the last 40
+takes `{conversation_id, message, connectors, timezone}`, loads the last 20
 saved messages, and saves the new question and answer together. Leave out
 `conversation_id` to start a new chat; the reply returns its id and a
 first-line title, and an AI-written title replaces it a moment later.
@@ -281,7 +281,16 @@ otherwise the reply just names the sources it checked.
 
 - `POST /uploads` (multipart, field `file`): checks the type by extension **and** contents (PDF, PNG, JPEG, GIF, WebP, UTF-8 text and code, DOCX, PPTX, XLSX; no SVG or other active content), refuses files over 5 MB, and stores the file in the private `chat-uploads` bucket at `<account id>/<upload id>/<file name>`. Returns `{id, name, mime, size, kind}`.
 - `GET /uploads/{id}`: downloads one of the signed-in account's own files (always as a download, `nosniff`).
-- `POST /chat` takes `attachments: [upload ids]` (up to 5). Each must belong to the signed-in account. PDFs and images are sent to Claude as document and image blocks; text as a text document; Word, PowerPoint and Excel as extracted text (`python-docx`, `python-pptx`, `openpyxl`). The IDs are saved with the message, so later messages in the chat include earlier files again, newest first, up to 18 MB in total (a Claude request is limited to 32 MB); older ones are replaced by a note asking the student to attach them again.
+- `POST /chat` takes `attachments: [upload ids]` (up to 5). Each must belong to the signed-in account. PDFs and images are sent to Claude as document and image blocks; text as a text document; Word, PowerPoint and Excel as extracted text (`python-docx`, `python-pptx`, `openpyxl`). The IDs are saved with the message. The next message (one follow-up) includes those files again, up to 18 MB in total (a Claude request is limited to 32 MB); after that they are replaced by a note asking the student to attach them again, because every file is paid for again on each message and tool round.
+
+### Token use
+
+Every chat message runs the agent, and each tool round re-sends the whole request, so the backend keeps requests small and cached:
+
+- **Prompt caching**: the tools and the fixed instructions (`prompts/ai_instructions.md`) carry a cache breakpoint, and the growing conversation is cached automatically (top-level `cache_control`), so repeated input is billed at the cache-read rate. The date, connector list and calendar rules sit after the fixed part.
+- At most 5 tool rounds per reply (`max_tool_rounds` in `config/agent.yaml`), the last 20 saved messages as history, connector results capped at 20,000 characters (with a note to ask a narrower question), and files re-sent for one follow-up only.
+- Each model call is logged as `Claude call: input=… cache_read=… cache_write=… output=…`, so cache hits can be checked in the backend terminal.
+- The model is set in `config/agent.yaml` (`claude-opus-5-5`); `claude-sonnet-5-5` or `claude-haiku-5-5` cost less.
 - Deleting a chat deletes its files. Uploads that were never sent stay in the bucket.
 
 The bucket has no storage policies, so browser keys can't reach it; the backend uses `SUPABASE_SECRET_KEY` (Supabase Dashboard → Project Settings → API Keys → Secret keys). Migration: `20261123000000_chat_uploads_bucket.sql`.

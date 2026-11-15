@@ -195,7 +195,7 @@ def test_long_history_sends_only_recent_messages_starting_with_the_user(setup):
     with TestClient(app) as client:
         done(client, {"conversation_id": str(chat["id"]), "message": "latest"})
     request, _ = setup["service"].requests[0]
-    assert len(request.messages) == 41 and request.messages[0].content == "q10" and request.messages[-1].content == "latest"
+    assert len(request.messages) == 21 and request.messages[0].content == "q20" and request.messages[-1].content == "latest"
 
 
 def test_pin_and_search(setup):

@@ -8,7 +8,7 @@ from psycopg2.extras import RealDictCursor
 from app.errors import AppError
 
 # How many earlier messages are sent back to the model with each new message.
-HISTORY_LIMIT = 40
+HISTORY_LIMIT = 20
 
 
 SUMMARY = "id, title, updated_at, pinned_at IS NOT NULL AS pinned"

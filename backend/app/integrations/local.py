@@ -33,6 +33,9 @@ def user_root(user_id: UUID | str) -> Path:
     return connectors_base() / "users" / str(UUID(str(user_id)))
 
 
+RESULT_CHARS = 20_000  # about 5,000 tokens per connector result
+
+
 class LocalConnectors:
     def __init__(self):
         self.project = BACKEND_DIR.parent / "integrations" / "handshake"
@@ -168,7 +171,10 @@ class LocalConnectors:
         except AppError:
             self.set_state(user_id, provider, IntegrationState.needs_login, "Please reconnect.")
             raise
-        return json.dumps(result["content"])[:60000]
+        text = json.dumps(result["content"])
+        if len(text) > RESULT_CHARS:  # every character is re-sent on each later tool round
+            text = text[:RESULT_CHARS] + f"\n[Result shortened to {RESULT_CHARS:,} characters. Ask for a narrower range or one course/job for the rest.]"
+        return text
 
 
 @lru_cache(maxsize=1)

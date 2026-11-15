@@ -185,3 +185,20 @@ def test_a_storage_outage_gives_a_clear_error(store, monkeypatch):
     with pytest.raises(AppError) as error:
         store.save(USER, "notes.pdf", PDF)
     assert error.value.status_code == 502 and "unavailable" in error.value.message
+
+
+def test_files_are_resent_for_one_follow_up_only(store):
+    repo, service = FakeConversations(), FakeChatService()
+    app.dependency_overrides[get_conversation_repository] = lambda: repo
+    app.dependency_overrides[get_chat_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            notes = client.post("/uploads", files={"file": ("notes.pdf", PDF, "application/pdf")}).json()
+            chat_id = json.loads(client.post("/chat", json={"message": "Read", "attachments": [notes["id"]]}).text.splitlines()[-1])["conversation_id"]
+            client.post("/chat", json={"conversation_id": chat_id, "message": "Follow-up"})
+            client.post("/chat", json={"conversation_id": chat_id, "message": "Another"})
+    finally:
+        app.dependency_overrides.pop(get_conversation_repository, None)
+        app.dependency_overrides.pop(get_chat_service, None)
+    assert service.requests[1][0].messages[0].blocks[0]["type"] == "document"  # first follow-up: still sent
+    assert service.requests[2][0].messages[0].blocks[0]["type"] == "text"  # later: named, not re-sent

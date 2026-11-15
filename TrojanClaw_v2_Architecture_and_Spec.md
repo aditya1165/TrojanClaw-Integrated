@@ -886,7 +886,7 @@ One class runs every goal (✅). `AgentRuntime.run(goal, messages, user_id=…, 
    * Connector tool definitions are cached per account and backend process. Each call runs the helper in a worker thread (`asyncio.to_thread`).
    * A failed call goes back to Claude as a tool error (`ToolError`), and connector answers add Brightspace or Handshake to `sources`.
    * **Caller tools.** The caller can add its own runnable tools and a note for the system prompt. Chat adds the Google Calendar draft tool (`propose_calendar_event`) this way (see the route below). `include_goal_tools=False` gives Claude only those tools, for a narrow retry.
-4. Runs the Anthropic SDK **tool runner** (`client.beta.messages.tool_runner`). The system prompt has two blocks: `prompts/ai_instructions.md`, then the current date and time in the student's time zone (from the request, default `America/Los_Angeles`), the available connectors, and any caller note. The runner uses the goal's model and effort, `max_iterations = max_tool_rounds` and the configured request options. Claude calls tools, often several in parallel, and the runner executes them through MCP until Claude answers.
+4. Runs the Anthropic SDK **tool runner** (`client.beta.messages.tool_runner`). The system prompt has two blocks: `prompts/ai_instructions.md`, then the current date and time in the student's time zone (from the request, default `America/Los_Angeles`), the available connectors, and any caller note. The runner uses the goal's model and effort, `max_iterations = max_tool_rounds` and the configured request options. Prompt caching is on: a breakpoint on the fixed instructions (tools render before it) and top-level automatic caching for the conversation. Claude calls tools, often several in parallel, and the runner executes them through MCP until Claude answers.
 5. Returns `AgentResult(text, sources, tool_calls, stop_reason, model)`. A refusal or an empty answer gets a clear fallback message.
 
 ```python
@@ -943,7 +943,7 @@ Update `prompts/ai_instructions.md` whenever a tool or feature lands, so the age
 model: claude-opus-5-5
 effort: low                    # low | medium | high | xhigh | max
 max_tokens: 16000
-max_tool_rounds: 8             # stop after this many Claude <-> tool round trips
+max_tool_rounds: 5             # stop after this many Claude <-> tool round trips (each one re-sends the whole request)
 
 # The system prompt (path relative to the repository root).
 system_prompt_file: prompts/ai_instructions.md
