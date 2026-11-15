@@ -6,11 +6,13 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 import anthropic
 import openai
 import psycopg2
 
-from app.api.routes import chat, health, integrations
+from app.api.routes import auth, chat, health, integrations, engagesc
 from app.config import ConfigurationError, get_settings
 from app.database import get_database
 from app.errors import AppError
@@ -31,7 +33,7 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="Single-user backend API for TrojanClaw.",
+        description="TrojanClaw academic copilot API.",
         lifespan=lifespan,
     )
     application.add_middleware(
@@ -41,6 +43,16 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError):
+        if request.url.path.startswith("/auth/"):
+            # Pydantic's default error input can contain submitted passwords.
+            return JSONResponse(status_code=422, content={"detail": [
+                {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+                for error in exc.errors()
+            ]})
+        return await request_validation_exception_handler(request, exc)
 
     @application.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
@@ -60,7 +72,7 @@ def create_app() -> FastAPI:
     @application.exception_handler(psycopg2.Error)
     async def database_error_handler(request: Request, exc: psycopg2.Error) -> JSONResponse:
         logger.exception("Database error on %s", request.url.path)
-        return _error(503, "dependency_unavailable", "The knowledge base is temporarily unavailable.")
+        return _error(503, "dependency_unavailable", "The database is temporarily unavailable.")
 
     @application.exception_handler(openai.OpenAIError)
     async def openai_error_handler(request: Request, exc: openai.OpenAIError) -> JSONResponse:
@@ -73,8 +85,10 @@ def create_app() -> FastAPI:
         return _error(502, "upstream_error", "The language model failed. Please try again.")
 
     application.include_router(health.router)
+    application.include_router(auth.router)
     application.include_router(chat.router)
     application.include_router(integrations.router)
+    application.include_router(engagesc.router)
     return application
 
 

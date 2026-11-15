@@ -13,6 +13,8 @@ from app.dependencies import get_chat_service
 from app.main import app
 from app.repositories.documents import DocumentRepository
 
+pytestmark = pytest.mark.usefixtures("signed_in_account")
+
 
 class AdaptingCursor:
     """Fake cursor that adapts every parameter exactly like psycopg2 would."""
@@ -67,7 +69,7 @@ def test_document_search_adapts_uuid_user_id() -> None:
 )
 def test_chat_maps_dependency_errors_without_leaking_details(error, status, code) -> None:
     class FailingChatService:
-        def chat(self, _request):
+        def chat(self, _request, *, user_id):
             raise error
 
     app.dependency_overrides[get_chat_service] = lambda: FailingChatService()

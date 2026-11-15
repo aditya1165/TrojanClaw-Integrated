@@ -37,8 +37,28 @@
 .auth-form input:focus { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .auth-submit { padding: 12px; margin-top: 4px; border-radius: 8px; background: var(--color-primary); color: white; font-size: 14px; font-weight: 600; cursor: pointer; }
 .auth-submit:hover { background: var(--color-primary-container); }
+.auth-dialog button:disabled { opacity: 0.6; cursor: wait; }
 .auth-switch { margin-top: 26px; text-align: center; font-size: 12px; color: var(--color-on-surface-variant); }
 .auth-switch button { color: var(--color-primary); font-weight: 600; cursor: pointer; }
 .auth-switch button:hover { text-decoration: underline; }
 .auth-error { color: var(--color-error); font-size: 12px; }
+.events-dialog { position: fixed; inset: 0; margin: auto; width: min(720px, calc(100% - 32px)); max-height: calc(100dvh - 40px); padding: 32px; border: 1px solid var(--color-surface-container-high); border-radius: 16px; background: white; color: var(--color-on-surface); overflow-y: auto; }
+.events-dialog::backdrop { background: #141b2b66; }
+.events-dialog h2 { font-size: 24px; font-weight: 650; letter-spacing: -0.03em; }
+.events-subtitle, .events-count, .events-footer { font-size: 12px; color: var(--color-on-surface-variant); margin-top: 8px; }
+.events-search { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 18px; }
+.events-search input, .events-search select { padding: 10px; border: 1px solid #d5d8e1; border-radius: 8px; font-size: 13px; min-width: 0; }
+.events-search input { flex: 1; min-width: 180px; }
+.events-search button, .events-link-button { background: var(--color-primary); color: white; border-radius: 7px; padding: 7px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.events-search button { font-size: 13px; }
+.events-link-button:disabled, .events-text-button:disabled { opacity: 0.6; cursor: wait; }
+.events-text-button { color: var(--color-primary); font-size: 11px; text-decoration: underline; cursor: pointer; }
+.events-notice { padding: 18px 0; font-size: 13px; color: var(--color-on-surface-variant); }
+.event-item { padding: 20px 0; border-bottom: 1px solid var(--color-surface-container-high); overflow-wrap: anywhere; }
+.event-date { color: var(--color-primary); font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+.event-item h3 { font-size: 16px; font-weight: 600; }
+.event-item h3 a:hover, .events-footer a { text-decoration: underline; }
+.event-host, .event-location, .event-description { font-size: 12px; line-height: 1.65; margin-top: 5px; }
+.event-location, .event-description { color: var(--color-on-surface-variant); }
+.events-footer { line-height: 1.7; margin-top: 18px; }
 @media (max-width: 640px) { .auth-dialog { padding: 32px 24px; } .chat-empty h2 { font-size: 22px; } }

@@ -16,11 +16,52 @@ export interface ChatResponse {
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+export interface AccountProfile {
+  id: string;
+  name: string;
+  username: string;
+}
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function apiRequest<T>(path: string, body?: object): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    credentials: "include",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    if (response.status === 401 && !path.startsWith("/auth/")) window.dispatchEvent(new Event("auth-expired"));
+    const data = await response.json().catch(() => ({}));
+    const detail = typeof data.detail === "string"
+      ? data.detail
+      : Array.isArray(data.detail)
+        ? data.detail.map((item: { msg: string }) => item.msg.replace(/^Value error, /, "")).join(" ")
+        : "Could not reach your account. Please try again.";
+    throw new ApiError(detail, response.status);
+  }
+  return response.status === 204 ? undefined as T : response.json();
+}
+
+export function authRequest<T>(path: string, body?: object): Promise<T> {
+  return apiRequest<T>(`/auth/${path}`, body);
+}
+
 export async function sendChatMessage(
   request: ChatRequest,
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
@@ -52,10 +93,11 @@ export async function chatEndpointFetch(
     },
     body: init?.body,
     signal: init?.signal,
-    credentials: init?.credentials,
+    credentials: "include",
   });
 
   if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event("auth-expired"));
     return response;
   }
 

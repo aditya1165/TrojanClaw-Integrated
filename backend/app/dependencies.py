@@ -8,6 +8,7 @@ from app.repositories.documents import DocumentRepository
 from app.services.chat import ChatService
 from app.services.embeddings import EmbeddingService
 from app.services.llm import LanguageModelService
+from app.services.engagesc import get_engagesc_service
 
 
 @lru_cache(maxsize=1)
@@ -18,4 +19,5 @@ def get_chat_service() -> ChatService:
         embeddings=EmbeddingService(settings),
         documents=DocumentRepository(get_database()),
         language_model=LanguageModelService(settings),
+        campus_events=get_engagesc_service(),
     )

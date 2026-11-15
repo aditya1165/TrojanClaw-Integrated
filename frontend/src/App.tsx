@@ -3,8 +3,9 @@ import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { API_BASE_URL, chatEndpointFetch } from "./lib/api";
+import { API_BASE_URL, chatEndpointFetch, authRequest, ApiError, type AccountProfile } from "./lib/api";
 import AuthDialog from "./AuthDialog";
+import EngageSCPanel from "./EngageSCPanel";
 import "./App.css";
 
 const getMessageText = (message: UIMessage): string => {
@@ -18,10 +19,13 @@ const getMessageText = (message: UIMessage): string => {
 };
 
 export default function App() {
-  const [isSignedIn, setIsSignedIn] = useState(true);
+  const [account, setAccount] = useState<AccountProfile | null>(null);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const isSignedIn = account !== null;
+  const userName = account?.name || "";
+  const username = account?.username || "";
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [userName, setUserName] = useState("Alric");
-  const [username, setUsername] = useState("alric");
   const [syncStatusNote, setSyncStatusNote] = useState<string | null>(null);
   const [fileAttached, setFileAttached] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -37,6 +41,7 @@ export default function App() {
     stop,
     reload,
     setInput,
+    setMessages,
   } = useChat({
     api: `${API_BASE_URL}/chat`,
     streamProtocol: "text",
@@ -61,16 +66,60 @@ export default function App() {
     });
   }, [messages, status]);
 
+  useEffect(() => {
+    let active = true;
+    authRequest<AccountProfile>("me")
+      .then((profile) => { if (active) setAccount(profile); })
+      .catch((error) => {
+        if (active && !(error instanceof ApiError && error.status === 401)) {
+          setSyncStatusNote("Could not restore your session. Please try signing in.");
+        }
+      })
+      .finally(() => { if (active) setIsCheckingSession(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const expireSession = () => {
+      stop();
+      setAccount(null);
+      setMessages([]);
+      setFileAttached(null);
+      setShowAuthModal(true);
+    };
+    window.addEventListener("auth-expired", expireSession);
+    return () => window.removeEventListener("auth-expired", expireSession);
+  }, [stop, setMessages]);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    try {
+      await authRequest<void>("logout", {});
+      stop();
+      setMessages([]);
+      setInput("");
+      setFileAttached(null);
+      setAccount(null);
+      setSyncStatusNote(null);
+    } catch {
+      setSyncStatusNote("Could not sign out. Please try again.");
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
   const handlePromptSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!isSignedIn) { setShowAuthModal(true); return; }
+    if (!input.trim() || isLoading || isCheckingSession || isSigningOut) return;
     handleSubmit(event);
   };
 
   const handlePromptKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!input.trim() || isLoading) return;
+      if (!isSignedIn) { setShowAuthModal(true); return; }
+      if (!input.trim() || isLoading || isCheckingSession || isSigningOut) return;
       handleSubmit();
     }
   };
@@ -118,155 +167,23 @@ export default function App() {
               </div>
             </div>
 
-            {/* Section Label */}
-            <div className="flex items-center justify-between">
-              <span className="font-label-sm text-label-sm text-on-surface-variant font-semibold uppercase tracking-wider">
-                {isSignedIn ? "Connections" : "Integrations"}
-              </span>
-              {isSignedIn ? (
-                <span className="flex h-2 w-2 relative" title="All connectors active">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-              ) : (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-container text-on-surface-variant">
-                  Disconnected
-                </span>
-              )}
-            </div>
-
-            {/* Connection Cards Stack */}
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">Extensions</span>
             <div className="flex flex-col gap-2">
-              {/* Brightspace */}
-              <div className="p-2.5 rounded-lg bg-surface-container-low transition-all hover:bg-surface-container flex flex-col gap-2 border border-surface-container-high/60">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-[18px]">school</span>
-                    <span className="font-label-lg text-label-lg text-on-surface">Brightspace</span>
+              {[
+                { name: "Brightspace", icon: "school" },
+                { name: "Piazza", icon: "chat_bubble" },
+                { name: "Google Calendar", icon: "event" },
+              ].map((extension) => (
+                <div key={extension.name} className="p-3 rounded-lg bg-surface-container-low border border-surface-container-high/60">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <span className="material-symbols-outlined text-primary text-[18px]" aria-hidden="true">{extension.icon}</span>
+                    {extension.name}
                   </div>
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      isSignedIn ? "bg-emerald-500" : "bg-surface-container-highest"
-                    }`}
-                  ></span>
+                  <p className="mt-1 text-[11px] text-on-surface-variant">Not linked</p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-body-sm text-body-sm text-on-surface-variant text-[11px]">
-                    {isSignedIn ? "Synced 12m ago" : "Not connected"}
-                  </span>
-                  <button
-                    onClick={() => {
-                      if (!isSignedIn) setShowAuthModal(true);
-                      else {
-                        setSyncStatusNote("Brightspace syllabus & assignments re-synced!");
-                        setTimeout(() => setSyncStatusNote(null), 3000);
-                      }
-                    }}
-                    className={`px-2 py-0.5 rounded font-label-sm text-label-sm shadow-xs transition-colors ${
-                      isSignedIn
-                        ? "bg-surface-container-lowest text-primary hover:bg-surface-container-high"
-                        : "bg-primary text-on-primary hover:bg-primary-container"
-                    }`}
-                  >
-                    {isSignedIn ? "Sync now" : "Connect"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Piazza */}
-              <div className="p-2.5 rounded-lg bg-surface-container-low transition-all hover:bg-surface-container flex flex-col gap-2 border border-surface-container-high/60">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-secondary text-[18px]">chat_bubble</span>
-                    <span className="font-label-lg text-label-lg text-on-surface">Piazza</span>
-                  </div>
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      isSignedIn ? "bg-amber-500" : "bg-surface-container-highest"
-                    }`}
-                  ></span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span
-                    className={`font-body-sm text-body-sm text-[11px] ${
-                      isSignedIn ? "text-error font-medium" : "text-on-surface-variant"
-                    }`}
-                  >
-                    {isSignedIn ? "Re-login needed" : "Not connected"}
-                  </span>
-                  <button
-                    onClick={() => setShowAuthModal(true)}
-                    className="px-2 py-0.5 rounded bg-primary text-on-primary font-label-sm text-label-sm hover:bg-primary-container transition-colors shadow-xs"
-                  >
-                    {isSignedIn ? "Log in again" : "Connect"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Google Calendar */}
-              <div className="p-2.5 rounded-lg bg-surface-container-low transition-all hover:bg-surface-container flex flex-col gap-1.5 border border-surface-container-high/60">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-tertiary-container text-[18px]">event</span>
-                    <span className="font-label-lg text-label-lg text-on-surface">Google Calendar</span>
-                  </div>
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      isSignedIn ? "bg-emerald-500" : "bg-surface-container-highest"
-                    }`}
-                  ></span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-body-sm text-body-sm text-on-surface-variant text-[11px]">
-                    {isSignedIn ? "Connected · TrojanClaw cal" : "Sync study blocks"}
-                  </span>
-                  {!isSignedIn && (
-                    <button
-                      onClick={() => setShowAuthModal(true)}
-                      className="px-2 py-0.5 rounded bg-primary text-on-primary font-label-sm text-label-sm shadow-xs hover:bg-primary-container transition-colors"
-                    >
-                      Connect
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* EngageSC */}
-              <div className="p-2.5 rounded-lg bg-surface-container-low transition-all hover:bg-surface-container flex flex-col gap-1.5 border border-surface-container-high/60">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-secondary text-[18px]">groups</span>
-                    <span className="font-label-lg text-label-lg text-on-surface">EngageSC</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        isSignedIn ? "bg-emerald-500" : "bg-surface-container-highest"
-                      }`}
-                    ></span>
-                    {isSignedIn && (
-                      <button className="font-label-sm text-label-sm text-primary hover:underline">Edit</button>
-                    )}
-                  </div>
-                </div>
-                {isSignedIn ? (
-                  <div className="flex flex-wrap gap-1 mt-0.5">
-                    <span className="px-1.5 py-0.5 rounded-full bg-secondary-container/40 text-on-secondary-container font-label-sm text-[10px]">
-                      AI/ML
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[10px]">
-                      Career Fairs
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant font-label-sm text-[10px]">
-                      Social
-                    </span>
-                  </div>
-                ) : (
-                  <p className="font-body-sm text-body-sm text-on-surface-variant text-[11px] leading-tight">
-                    Connect your USC profile to discover campus events
-                  </p>
-                )}
-              </div>
+              ))}
+              <EngageSCPanel key={account?.id || "guest"} signedIn={isSignedIn} onSignIn={() => setShowAuthModal(true)} />
+              <p className="text-[11px] leading-relaxed text-on-surface-variant">More extension connections coming soon.</p>
             </div>
           </div>
 
@@ -296,7 +213,8 @@ export default function App() {
                     <span className="material-symbols-outlined text-[18px]">settings</span>
                   </button>
                   <button
-                    onClick={() => setIsSignedIn(false)}
+                    onClick={handleSignOut}
+                    disabled={isSigningOut}
                     className="p-1 hover:text-error transition-colors rounded hover:bg-surface-container"
                     title="Sign out"
                   >
@@ -355,9 +273,7 @@ export default function App() {
                   )}
                 </div>
                 <p className="font-body-sm text-body-sm text-on-surface-variant flex items-center gap-2 mt-0.5">
-                  <span>{isSignedIn ? "Powered by Claude & USC RAG" : "Demo Mode"}</span>
-                  <span>•</span>
-                  <span>{isSignedIn ? "Brightspace & Google Cal Synced" : "Sign in with USC to sync schedules"}</span>
+                  <span>{isCheckingSession ? "Checking your session..." : isSignedIn ? "Your academic copilot" : "Sign in to start a conversation"}</span>
                 </p>
               </div>
             </div>
@@ -368,7 +284,7 @@ export default function App() {
                   {syncStatusNote}
                 </span>
               )}
-              {hasHistory && (
+              {hasHistory && isSignedIn && (
                 <button
                   type="button"
                   onClick={() => reload()}
@@ -399,10 +315,11 @@ export default function App() {
                 </>
               ) : (
                 <button
-                  onClick={() => setIsSignedIn(false)}
+                  onClick={handleSignOut}
+                    disabled={isSigningOut}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-surface-container-high text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
                 >
-                  Preview Signed-out
+                  {isSigningOut ? "Signing out..." : "Sign out"}
                 </button>
               )}
             </div>
@@ -517,7 +434,7 @@ export default function App() {
                 ) : (
                   <button
                     type="submit"
-                    disabled={!input.trim()}
+                    disabled={!input.trim() || isCheckingSession || isSigningOut}
                     className="px-4 py-2 rounded-xl bg-primary text-on-primary font-label-md text-label-md font-semibold flex items-center gap-1.5 shadow-xs hover:bg-primary-container disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
                   >
                     <span>Send</span>
@@ -533,10 +450,12 @@ export default function App() {
       {showAuthModal && (
         <AuthDialog
           onClose={() => setShowAuthModal(false)}
-          onSubmit={({ name, username: nextUsername }) => {
-            setUserName(name || nextUsername);
-            setUsername(nextUsername);
-            setIsSignedIn(true);
+          onSubmit={(profile) => {
+            stop();
+            setMessages([]);
+            setInput("");
+            setAccount(profile);
+            setSyncStatusNote(null);
             setShowAuthModal(false);
           }}
         />
