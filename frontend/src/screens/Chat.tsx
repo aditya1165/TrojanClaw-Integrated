@@ -177,7 +177,7 @@ export default function Chat({ theme, onToggleTheme, onHome, onConnect, account,
             )}
           </form>
           <p className="text-center text-xs text-muted">
-            Calendar additions require your approval. Double-check important dates in Brightspace.
+            Calendar changes require your approval. Double-check important dates in Brightspace.
           </p>
         </div>
       </main>

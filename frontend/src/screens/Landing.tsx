@@ -63,7 +63,7 @@ export default function Landing({ theme, onToggleTheme, onContinue, onOpenChat, 
           </div>
           <p className="inline-flex items-center gap-1.5 text-[13px] text-muted">
             <LockIcon />
-            Academic sources are read-only. Calendar additions always need your approval.
+            Academic sources are read-only. Calendar changes always need your approval.
           </p>
         </section>
 

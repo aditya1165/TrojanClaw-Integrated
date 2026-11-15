@@ -1,5 +1,9 @@
 # Chat connectors
 
+Recurring reminders and edits: chat can draft a bounded daily/weekly/monthly series with optional popup reminders, or propose changes to an existing timed event. Existing-event edits require a read first to identify the event. The card shows the before/after details and whether the edit affects one occurrence or the whole series. **Approve changes** is the only way to apply an edit. New series are limited to 52 occurrences within a year, show every occurrence for review, and keep their local time across daylight saving changes. Deletions, guest changes and all-day event edits are not supported.
+
+Calendar chat can read events from the connected primary Google Calendar using the local MCP server's `list-events` tool. “What are my events?” defaults to the next seven days; explicit ranges can cover up to 31 days. Results include timed and all-day events, with up to 100 events per response; a limited response asks the user to narrow the range. Reading requires no approval. Every calendar addition still requires the user to review its card and click **Approve addition**. Existing Google OAuth scopes already include event reading; reconnect only if Google reports missing permissions or expired access.
+
 The main chat supports Brightspace and Handshake with separate persistent Chromium profiles. Piazza is shown as **Coming soon** and cannot be selected or called.
 
 ## Local setup

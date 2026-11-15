@@ -23,11 +23,23 @@ code and its MIT license. It recreates the re-export-only conflict-detection
 barrel omitted from the source map. Generated files are ignored by Git. Package
 and dependency versions/integrities are pinned by `package-lock.json`.
 
-Only `list-calendars`, `get-event`, and `get-freebusy` are registered for reads.
+Only `list-calendars`, `list-events`, `get-event`, and `get-freebusy` are registered for reads.
 `create-event` is registered only for an approval request whose stored proposal
-marker matches its deterministic event ID. No other modification or account
-management tools are exposed. The model only drafts proposals; backend approval
-remains mandatory. Availability uses the native upstream free/busy handler.
+marker matches its deterministic event ID. `update-event` is enabled only for an
+approved change proposal targeting an existing event. The original Google ETag
+is supplied as `If-Match` on the target PATCH to prevent overwriting later edits.
+An update proposal stores its target and before-image in the existing private
+JSON document; legacy create proposals remain readable. No schema migration is needed.
+The model only drafts proposals; backend approval remains mandatory.
+
+New schedules support bounded daily, weekly and monthly recurrence (up to 52
+occurrences within one year), local IANA time zones and an optional popup reminder.
+The review card lists the occurrence dates. Availability is checked across every
+new occurrence using the native free/busy handler. Existing timed events can be
+edited individually or as an entire recurring series; unchanged recurrence,
+reminders and guests are preserved. All-day edits, deletions and guest changes
+are not currently supported. Uncertain updates recover using the stored proposal
+marker without issuing a second PATCH.
 
 The standard Google Calendar API must be enabled in the OAuth client's project.
 Google's hosted MCP service, Developer Preview registration, and agent-client

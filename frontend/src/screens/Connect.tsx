@@ -43,7 +43,7 @@ export default function Connect({ theme, onToggleTheme, onBack, onContinue, acco
 
         <p className="flex items-center gap-2 text-[13px] text-muted">
           <LockIcon />
-          Academic sources are read-only. Google Calendar additions require your approval.
+          Academic sources are read-only. Google Calendar changes require your approval.
         </p>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
