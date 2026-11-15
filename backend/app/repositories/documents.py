@@ -1,6 +1,7 @@
 """Knowledge-document persistence and vector search."""
 
 from uuid import UUID
+from functools import cached_property
 
 from app.database import Database
 from app.models.document import RetrievedDocument
@@ -10,6 +11,18 @@ class DocumentRepository:
     def __init__(self, database: Database):
         self._database = database
 
+    @cached_property
+    def _per_user_documents(self) -> bool:
+        # Newer databases share public campus pages. Older installations still
+        # carry user_id; retain their ownership filter until they migrate.
+        with self._database.connection() as connection, connection.cursor() as cursor:
+            cursor.execute("""SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'documents'
+                AND column_name = 'user_id'
+            )""")
+            return cursor.fetchone()[0]
+
     def search(
         self,
         embedding: list[float],
@@ -18,8 +31,11 @@ class DocumentRepository:
         data_types: list[str] | None = None,
     ) -> list[RetrievedDocument]:
         vector = "[" + ",".join(map(str, embedding)) + "]"
-        filters = ["user_id = %s", "embedding IS NOT NULL"]
-        parameters: list[object] = [vector, str(user_id)]  # psycopg2 cannot adapt UUID
+        filters = ["embedding IS NOT NULL"]
+        parameters: list[object] = [vector]
+        if self._per_user_documents:
+            filters.append("user_id = %s")
+            parameters.append(str(user_id))  # psycopg2 cannot adapt UUID
         if data_types:
             filters.append("data_type = ANY(%s)")
             parameters.append(data_types)

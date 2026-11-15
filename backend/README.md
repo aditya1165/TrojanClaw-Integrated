@@ -2,6 +2,10 @@
 
 This is the Python backend for **TrojanClaw**, built with **FastAPI** and configured to use **Supabase**.
 
+Google-first USC onboarding and Google Calendar MCP setup, including the two
+OAuth callback URIs and mandatory event approval, are documented in
+[Google Calendar setup](../docs/google-calendar.md).
+
 ## Architecture
 
 ```text

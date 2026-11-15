@@ -7,8 +7,12 @@ from time import monotonic
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.config import get_settings
-from app.models.auth import AccountProfile, LoginRequest, RegisterRequest
+from app.models.auth import (
+    AccountProfile, LoginRequest, RegisterRequest, UscLoginPoll, UscLoginStart, UscLoginStartRequest,
+    UscLoginStatus,
+)
 from app.services.auth import AuthService, COOKIE_NAME, SESSION_SECONDS, get_auth_service
+from app.services.usc_auth import usc_login
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -78,6 +82,29 @@ def login(payload: LoginRequest, request: Request, response: Response,
     profile, token = service.login(payload.username, payload.password.get_secret_value(), request.cookies.get(COOKIE_NAME))
     _set_cookie(response, token)
     return profile
+
+
+@router.post("/usc/start", response_model=UscLoginStart,
+             dependencies=[Depends(require_trusted_origin), Depends(limit_auth_attempts)])
+def usc_start(response: Response, payload: UscLoginStartRequest | None = None) -> UscLoginStart:
+    """Open the USC sign-in popup on this computer. Poll /auth/usc/status with the returned ID."""
+    response.headers["Cache-Control"] = "no-store"
+    position = (payload.left, payload.top) if payload and payload.left is not None and payload.top is not None else None
+    return UscLoginStart(attempt_id=usc_login.start(position))
+
+
+@router.post("/usc/status", response_model=UscLoginStatus, dependencies=[Depends(require_trusted_origin)])
+def usc_status(payload: UscLoginPoll, request: Request, response: Response,
+               service: AuthService = Depends(get_auth_service)) -> UscLoginStatus:
+    response.headers["Cache-Control"] = "no-store"
+    attempt = usc_login.take(payload.attempt_id)
+    if attempt.status == "waiting":
+        return UscLoginStatus(status="waiting")
+    if attempt.status == "failed":
+        return UscLoginStatus(status="failed", detail="The USC login did not finish. Please try again.")
+    token = service.start_session(attempt.account.id, request.cookies.get(COOKIE_NAME))
+    _set_cookie(response, token)
+    return UscLoginStatus(status="done", account=attempt.account)
 
 
 @router.get("/me", response_model=AccountProfile)

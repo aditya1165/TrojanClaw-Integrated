@@ -19,8 +19,9 @@ pytestmark = pytest.mark.usefixtures("signed_in_account")
 class AdaptingCursor:
     """Fake cursor that adapts every parameter exactly like psycopg2 would."""
 
-    def __init__(self, log: list):
+    def __init__(self, log: list, per_user=True):
         self._log = log
+        self.per_user = per_user
 
     def __enter__(self):
         return self
@@ -36,16 +37,20 @@ class AdaptingCursor:
     def fetchall(self):
         return [("chunk", "https://usc.edu", "Title", "general", None, 0.1)]
 
+    def fetchone(self):
+        return (self.per_user,)
+
 
 class FakeDatabase:
-    def __init__(self):
+    def __init__(self, per_user=True):
         self.log: list = []
+        self.per_user = per_user
 
     @contextmanager
     def connection(self):
         class Connection:
             def cursor(inner):
-                return AdaptingCursor(self.log)
+                return AdaptingCursor(self.log, self.per_user)
 
         yield Connection()
 
@@ -57,7 +62,18 @@ def test_document_search_adapts_uuid_user_id() -> None:
         user_id=UUID("00000000-0000-0000-0000-000000000001"),
     )
     assert len(results) == 1
-    assert database.log[0][1][1] == "00000000-0000-0000-0000-000000000001"
+    assert database.log[1][1][1] == "00000000-0000-0000-0000-000000000001"
+
+
+def test_document_search_supports_shared_campus_schema_and_caches_detection():
+    database = FakeDatabase(per_user=False)
+    repository = DocumentRepository(database)
+    for _ in range(2):
+        assert repository.search(embedding=[0.1, 0.2], user_id=UUID(int=2))
+    assert sum("information_schema.columns" in query for query, _ in database.log) == 1
+    searches = [(query, parameters) for query, parameters in database.log if "FROM public.documents" in query]
+    assert all("user_id = %s" not in query for query, _ in searches)
+    assert all(parameters == ["[0.1,0.2]", "[0.1,0.2]", 8] for _, parameters in searches)
 
 
 @pytest.mark.parametrize(

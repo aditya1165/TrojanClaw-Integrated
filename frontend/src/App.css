@@ -18,6 +18,11 @@
 .auth-switch button { color: var(--tc-accent-fg); font-weight: 600; cursor: pointer; }
 .auth-switch button:hover { text-decoration: underline; }
 .auth-error { color: var(--tc-error); font-size: 12px; }
+.auth-usc { display: flex; flex-direction: column; gap: 14px; margin-top: 28px; }
+.auth-usc .auth-description { margin-top: 0; }
+.auth-link { color: var(--tc-accent-fg); font-weight: 600; text-decoration: underline; cursor: pointer; }
+.auth-divider { display: flex; align-items: center; gap: 12px; margin-top: 6px; color: var(--tc-muted); font-size: 12px; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--tc-line); }
 .events-dialog { position: fixed; inset: 0; margin: auto; width: min(720px, calc(100% - 32px)); max-height: calc(100dvh - 40px); padding: 32px; border: 1px solid var(--tc-line); border-radius: 16px; background: var(--tc-surface); color: var(--tc-fg); overflow-y: auto; }
 .events-dialog::backdrop { background: #141b2b66; }
 .events-dialog h2 { font-size: 24px; font-weight: 650; letter-spacing: -0.03em; }

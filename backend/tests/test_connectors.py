@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.errors import AppError
+from app.integrations.local import user_root
 from app.integrations.local import LocalConnectors, get_local_connectors
 from app.main import app
 from app.models.chat import ChatRequest
 from app.services.chat import ChatService
 from app.services.llm import LanguageModelService
+
+USER = UUID(int=2)
 
 
 @pytest.fixture
@@ -23,10 +26,10 @@ def connectors(monkeypatch, tmp_path):
 
 
 def test_saved_sessions_survive_backend_restart_and_remain_separate(connectors):
-    path = connectors.root / "brightspace" / "cookies.json"
+    path = user_root(USER) / "brightspace" / "cookies.json"
     path.parent.mkdir(parents=True)
     path.write_text("[]")
-    statuses = {item.provider: item.state for item in connectors.statuses()}
+    statuses = {item.provider: item.state for item in connectors.statuses(USER)}
     assert statuses == {"brightspace": "saved", "handshake": "not_configured", "piazza": "unavailable"}
 
 
@@ -34,9 +37,9 @@ def test_connection_job_marks_verified_login_connected(connectors, monkeypatch):
     calls = []
     monkeypatch.setattr(connectors, "_run", lambda *args, **kwargs: calls.append(args) or {"ok": True})
     monkeypatch.setattr(connectors._jobs, "submit", lambda function, *args: function(*args))
-    connectors.connect("brightspace")
-    assert calls == [("brightspace", "connect")]
-    assert next(item for item in connectors.statuses() if item.provider == "brightspace").state == "connected"
+    connectors.connect(USER, "brightspace")
+    assert calls == [(USER, "brightspace", "connect")]
+    assert next(item for item in connectors.statuses(USER) if item.provider == "brightspace").state == "connected"
 
 
 def test_failed_login_is_not_reported_as_connected(connectors, monkeypatch):
@@ -44,8 +47,8 @@ def test_failed_login_is_not_reported_as_connected(connectors, monkeypatch):
         raise AppError("Reconnect.", "connector_failed", 502)
     monkeypatch.setattr(connectors, "_run", fail)
     monkeypatch.setattr(connectors._jobs, "submit", lambda function, *args: function(*args))
-    connectors.connect("handshake")
-    assert next(item for item in connectors.statuses() if item.provider == "handshake").state == "needs_login"
+    connectors.connect(USER, "handshake")
+    assert next(item for item in connectors.statuses(USER) if item.provider == "handshake").state == "needs_login"
 
 
 def test_login_timeout_reports_specific_safe_error(connectors, monkeypatch, tmp_path):
@@ -57,7 +60,7 @@ def test_login_timeout_reports_specific_safe_error(connectors, monkeypatch, tmp_
         returncode=1, stdout=json.dumps({"ok": False, "code": "login_timeout", "error": "private-test-value"}),
     ))
     with pytest.raises(AppError) as result:
-        connectors._run("handshake", "connect")
+        connectors._run(USER, "handshake", "connect")
     assert result.value.code == "login_timeout"
     assert "five minutes" in result.value.message
     assert "private-test-value" not in result.value.message
@@ -65,9 +68,9 @@ def test_login_timeout_reports_specific_safe_error(connectors, monkeypatch, tmp_
 
 def test_piazza_and_unselected_connector_are_blocked(connectors):
     with pytest.raises(AppError):
-        connectors.connect("piazza")
+        connectors.connect(USER, "piazza")
     with pytest.raises(AppError):
-        connectors.call("handshake__hs_get_profile", {}, ["brightspace"])
+        connectors.call(USER, "handshake__hs_get_profile", {}, ["brightspace"])
 
 
 def test_browser_cannot_trigger_connect_from_unapproved_origin(connectors):
@@ -80,6 +83,7 @@ def test_browser_cannot_trigger_connect_from_unapproved_origin(connectors):
         app.dependency_overrides.clear()
 
 
+@pytest.mark.usefixtures("signed_in_account")
 def test_allowed_loopback_origin_can_connect_across_localhost_names(connectors, monkeypatch):
     monkeypatch.setattr(connectors, "_run", lambda *args, **kwargs: {"ok": True})
     monkeypatch.setattr(connectors._jobs, "submit", lambda function, *args: function(*args))
@@ -95,7 +99,7 @@ def test_allowed_loopback_origin_can_connect_across_localhost_names(connectors, 
 
 def test_chat_connector_path_does_not_require_campus_database(monkeypatch):
     tools = [{"name": "handshake__hs_get_profile", "description": "Profile", "input_schema": {"type": "object"}}]
-    fake = SimpleNamespace(tools=lambda providers: tools, call=lambda *args: "profile data")
+    fake = SimpleNamespace(tools=lambda user_id, providers: tools, call=lambda *args: "profile data")
     monkeypatch.setattr("app.services.chat.get_local_connectors", lambda: fake)
 
     class Model:
@@ -116,7 +120,7 @@ def test_connector_chat_preserves_authenticated_engagesc_context(monkeypatch):
     campus.prompt_context.return_value = "Public EngageSC event: Robotics workshop"
     model = MagicMock()
     model.respond_with_tools.return_value = "Your events"
-    monkeypatch.setattr("app.services.chat.get_local_connectors", lambda: SimpleNamespace(tools=lambda _: []))
+    monkeypatch.setattr("app.services.chat.get_local_connectors", lambda: SimpleNamespace(tools=lambda user_id, providers: []))
     service = ChatService(None, None, None, model, campus)
     request = ChatRequest(messages=[{"role": "user", "content": "My events?"}], connectors=["handshake"])
     assert service.chat(request, user_id=UUID(int=2)).response == "Your events"
@@ -124,7 +128,8 @@ def test_connector_chat_preserves_authenticated_engagesc_context(monkeypatch):
     assert "Robotics workshop" in model.respond_with_tools.call_args.args[1]
 
 
-def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch):
+@pytest.mark.parametrize("require_tool", [False, True])
+def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch, require_tool):
     class Block:
         type = "tool_use"
         id = "call1"
@@ -159,9 +164,11 @@ def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch):
     calls = []
     request = ChatRequest(messages=[{"role": "user", "content": "My profile?"}])
     answer = model.respond_with_tools(request.messages, "system", [{"name": Block.name}],
-                                     lambda *args: calls.append(args) or "profile data")
+                                     lambda *args: calls.append(args) or "profile data", require_tool=require_tool)
     assert answer == "Your profile"
     assert calls == [(Block.name, {})]
+    assert requests[0].get("tool_choice") == ({"type": "any"} if require_tool else None)
+    assert "tool_choice" not in requests[1]
     assert requests[-1]["messages"][-1]["content"][0]["type"] == "tool_result"
 
 

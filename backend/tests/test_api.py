@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -34,7 +36,7 @@ def test_handshake_status_uses_local_transport() -> None:
 
     service = LocalConnectors()
     try:
-        handshake = next(item for item in service.statuses() if item.provider == "handshake")
+        handshake = next(item for item in service.statuses(UUID(int=2)) if item.provider == "handshake")
         assert handshake.transport == "stdio"
         assert handshake.state in {"saved", "not_configured"}
     finally:
@@ -70,4 +72,4 @@ def test_chat_preserves_frontend_response_contract() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {"response": "Hello from TrojanClaw"}
+    assert response.json() == {"response": "Hello from TrojanClaw", "calendar_proposals": []}

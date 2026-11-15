@@ -9,6 +9,7 @@ from app.services.chat import ChatService
 from app.services.embeddings import EmbeddingService
 from app.services.llm import LanguageModelService
 from app.services.engagesc import get_engagesc_service
+from app.services.calendar import get_calendar_service
 
 
 @lru_cache(maxsize=1)
@@ -20,4 +21,5 @@ def get_chat_service() -> ChatService:
         documents=DocumentRepository(get_database()),
         language_model=LanguageModelService(settings),
         campus_events=get_engagesc_service(),
+        calendar=get_calendar_service(),
     )

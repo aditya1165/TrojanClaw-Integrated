@@ -35,16 +35,18 @@ class LanguageModelService:
     def respond_with_tools(
         self, messages: list[ChatMessage], system_prompt: str,
         tools: list[dict], call_tool: Callable[[str, dict], str],
+        *, require_tool: bool = False,
     ) -> str:
         if not self._settings.anthropic_api_key:
             raise DependencyUnavailableError("Anthropic")
         conversation = [{"role": message.role.value, "content": message.content} for message in messages]
         permitted = {tool["name"] for tool in tools}
         with Anthropic(api_key=self._settings.anthropic_api_key) as client:
-            for _ in range(6):
+            for turn in range(6):
+                choice = {"tool_choice": {"type": "any"}} if require_tool and turn == 0 else {}
                 response = client.messages.create(
                     model=self._settings.anthropic_model, max_tokens=2048,
-                    system=system_prompt, messages=conversation, tools=tools,
+                    system=system_prompt, messages=conversation, tools=tools, **choice,
                 )
                 calls = [block for block in response.content if block.type == "tool_use"]
                 if not calls:

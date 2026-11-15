@@ -1,0 +1,15 @@
+{
+  "name": "trojanclaw-google-calendar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build-bridge.mjs",
+    "postinstall": "node build-bridge.mjs",
+    "test": "node --test bridge.test.mjs"
+  },
+  "dependencies": {
+    "@cocal/google-calendar-mcp": "2.8.1",
+    "esbuild": "0.28.2"
+  }
+}

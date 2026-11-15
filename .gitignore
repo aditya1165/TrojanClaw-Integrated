@@ -39,6 +39,7 @@ frontend/dist/
 frontend/.vite/
 frontend/coverage/
 frontend/.eslintcache
+integrations/google-calendar/.generated/
 
 # Build artifacts
 build/
