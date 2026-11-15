@@ -1,0 +1,78 @@
+import type { ReactNode } from "react";
+import type { Theme } from "../theme";
+import { Button, CalendarIcon, CapIcon, ChatIcon, LockIcon, Logo, ThemeToggle } from "../components/ui";
+
+interface Service {
+  name: string;
+  description: string;
+  icon: ReactNode;
+}
+
+// Connecting is not wired to the backend yet, so every service shows "Not connected".
+const SERVICES: Service[] = [
+  { name: "Google Calendar", description: "Free time and study blocks", icon: <CalendarIcon /> },
+  { name: "Brightspace", description: "Deadlines, assignments, announcements", icon: <CapIcon /> },
+  { name: "Piazza", description: "Course posts and instructor notes", icon: <ChatIcon /> },
+];
+
+interface ConnectProps {
+  theme: Theme;
+  onToggleTheme: () => void;
+  onBack: () => void;
+  onContinue: () => void;
+}
+
+export default function Connect({ theme, onToggleTheme, onBack, onContinue }: ConnectProps) {
+  return (
+    <div className="min-h-screen bg-bg text-fg">
+      <header className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-5">
+        <Logo />
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </header>
+
+      <main className="mx-auto flex max-w-xl flex-col gap-6 px-6 pt-10 pb-16">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl leading-tight font-semibold tracking-[-0.025em]">Connect your accounts</h1>
+          <p className="text-[15px] leading-relaxed text-muted">
+            Log in once to each service in a browser window. Your passwords stay with USC, Piazza and
+            Google.
+          </p>
+        </div>
+
+        <ul className="flex flex-col rounded-2xl border border-line bg-surface">
+          {SERVICES.map((service, index) => (
+            <li
+              key={service.name}
+              className={`flex items-center gap-3.5 px-5 py-4 ${index > 0 ? "border-t border-line" : ""}`}
+            >
+              <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-subtle">
+                {service.icon}
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">{service.name}</span>
+                <span className="text-[13px] text-muted">{service.description}</span>
+              </div>
+              <Button disabled title="Not available yet" className="px-4">
+                Connect
+              </Button>
+            </li>
+          ))}
+        </ul>
+
+        <p className="flex items-center gap-2 text-[13px] text-muted">
+          <LockIcon />
+          Read-only access. TrojanClaw can’t post, submit or change anything.
+        </p>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <Button variant="ghost" onClick={onBack} className="px-0">
+            Back
+          </Button>
+          <Button onClick={onContinue} className="min-h-12 px-6 text-[15px]">
+            Continue to chat
+          </Button>
+        </div>
+      </main>
+    </div>
+  );
+}
