@@ -6,7 +6,7 @@
 
 ![TrojanClaw cover image](https://github.com/aditya1165/TrojanClaw/blob/main/cover/trojanclaw-cover.png?raw=true)
 
-## Current status (November 2026)
+## Current status (November 2026) 
 
 This README's feature list describes the original hackathon build. The backend has since been refactored into a single-user API (`backend/app/api`, `services`, `repositories`), and the current behavior differs:
 
