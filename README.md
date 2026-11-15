@@ -12,7 +12,7 @@ Then just ask: *what's due, what's next, what fits your week.*
 ![Python](https://img.shields.io/badge/Python-3.11-990000?style=flat-square&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-990000?style=flat-square&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-FFCC00?style=flat-square&logo=react&logoColor=black)
-![Claude](https://img.shields.io/badge/Claude-Opus_5.5-FFCC00?style=flat-square&logo=anthropic&logoColor=black)
+![Claude](https://img.shields.io/badge/Claude-Sonnet_5.5-FFCC00?style=flat-square&logo=anthropic&logoColor=black)
 ![Supabase](https://img.shields.io/badge/Supabase-Postgres_+_Storage-990000?style=flat-square&logo=supabase&logoColor=white)
 ![Platforms](https://img.shields.io/badge/runs_on-macOS_·_Windows-FFCC00?style=flat-square)
 
@@ -26,10 +26,11 @@ Then just ask: *what's due, what's next, what fits your week.*
 
 | | |
 | :--- | :--- |
-| 🔐 **One sign-in** | **Continue with Google** with your @usc.edu account, then one USC login (NetID + Duo). TrojanClaw connects Google Calendar, Brightspace, Handshake and your WebReg course bin in the background. |
-| 💬 **Chat that checks for you** | Replies stream in word by word, with a live status line ("Checking Brightspace: upcoming due dates") and source links under each answer. |
+| 🔐 **One sign-in** | **Continue with Google** with your @usc.edu account, then one USC login (NetID + Duo) in a small window. TrojanClaw connects Google Calendar, Brightspace, Handshake and your WebReg course bin, and the window closes by itself. |
+| 💬 **Chat that checks for you** | Replies stream in word by word, with a live status line ("Checking Brightspace: upcoming due dates") and the sources each answer used. |
+| 🃏 **Answers as cards** | Jobs, events, deadlines, courses and posts come back as tidy cards with an **Open** button to the real page in Handshake, Brightspace, Piazza or EngageSC. Every link comes from a tool result, never made up. |
 | 🗂️ **Saved chats** | Every chat has its own link, an AI-written title, and can be searched, pinned, renamed or deleted. |
-| 🔌 **Sources you control** | Turn Brightspace, Handshake, Piazza and campus events on or off from the chat box. If a session expires, a banner offers **Reconnect**. |
+| 🔌 **Sources you control** | Flip Brightspace, Handshake, Piazza and campus events on or off with one switch in the chat box. If a session expires, a banner offers **Reconnect**. |
 | 📅 **Google Calendar** | Ask what's on your calendar, or have chat draft an event, a repeating series or a change. Nothing is saved until you press **Approve**. |
 | 🎓 **Next term's classes** | Your WebReg course bin (planned and registered sections) is read during sign-in, so you can ask about next term. Read-only: it never registers or drops. |
 | 📎 **Files and 🎤 voice** | Attach PDFs, images, notes, Word, PowerPoint or Excel (5 per message, 5 MB each), or dictate your question. |
@@ -57,9 +58,12 @@ flowchart LR
 
 1. **You ask** in the chat. The browser sends only your new message (and any files).
 2. **The agent decides** which tools it needs: your synced course data, a live connector, your calendar, WebReg, or public USC information.
-3. **The reply streams back** with what it checked and where each fact came from. Your chat is saved for next time.
+3. **The reply streams back** with what it checked, lists shown as linked cards, and where each fact came from. Your chat is saved for next time.
 
 Connector logins run in a real Chrome window on **your** computer, and each TrojanClaw account keeps its own sessions.
+
+> [!TIP]
+> The agent runs on **Claude Sonnet 5.5** at low effort, with prompt caching so earlier turns are re-read at the cache price. Change the model, effort or tool rounds in [`config/agent.yaml`](config/agent.yaml); `claude-haiku-5-5` is cheaper still.
 
 ---
 
@@ -162,7 +166,7 @@ TrojanClaw_v2/
 │   ├── app/api/routes/      HTTP endpoints
 │   └── tests/               Backend tests
 ├── frontend/                React 19 + Vite + Tailwind (USC cardinal & gold)
-│   └── src/                 Screens, chat, Sources, Settings
+│   └── src/                 Screens, chat, answer cards, Sources, Settings
 ├── integrations/            Connector helpers: Handshake + Brightspace, Piazza, Google Calendar
 ├── config/agent.yaml        Model, effort and the agent's tools
 ├── prompts/                 The agent's instructions
@@ -189,10 +193,12 @@ TrojanClaw_v2/
 | You see | Fix |
 | :--- | :--- |
 | "This Google sign-in expired" | You mixed `localhost` and `127.0.0.1`. Open the app at `http://127.0.0.1:5173`. |
+| The **Continue with Google** button is greyed out | Google sign-in isn't set up: fill in the `GOOGLE_CALENDAR_*` settings in `backend/.env`. |
+| "One more step: your USC login" keeps waiting | The small USC window may be behind your browser (check the Dock or ⌘Tab). If it's stuck, the backend terminal's `USC login:` / `USC setup:` lines show which step. |
 | "Install the local connectors first" | Run the `uv sync` lines in step 2. |
 | "Install the Google Calendar connector dependencies first" | Run `npm ci --prefix integrations/google-calendar`. |
 | "File uploads need SUPABASE_SECRET_KEY" | Add the secret key (Supabase → Project Settings → API Keys) to `backend/.env`. |
-| A source shows **Sign-in needed** | Click **Reconnect** on the banner, or **Sign in again** in Sources. |
+| A source shows **Sign-in needed** | Click **Reconnect** on the banner, or in Sources. |
 | `Address already in use` on port 8000 | An old backend is still running. Stop it, or use another port. |
 
 ---
