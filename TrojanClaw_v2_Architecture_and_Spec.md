@@ -11,29 +11,41 @@
 
 **TrojanClaw v2** is an AI academic copilot and autonomous time-blocking scheduler engineered specifically for USC students. It unifies academic obligations (**Brightspace** assignments, **Piazza** announcements) and campus life (**EngageSC** club events) into an intelligent timeline that automatically schedules dedicated study blocks directly into **Google Calendar** using **Claude 3.5 Sonnet**.
 
-To bypass Duo 2FA and Shibboleth SSO blocks during testing and judging, TrojanClaw employs zero-friction data connectors (Brightspace `.ics` tokenized feeds and Piazza session/demo sync) backed by **Supabase `pgvector`** for semantic retrieval and long-term context storage.
+USC protects Brightspace with Shibboleth SSO and Duo 2FA, so TrojanClaw never stores or types a student's USC password. Instead, the student signs in **themselves**, in a real browser window opened by a small **TrojanClaw Sync Helper** running on their own computer. Read-only MCP servers (`brightspace-mcp-server` and `mcp-piazza`) then pull the student's Brightspace and Piazza data, and the helper uploads it to **Supabase `pgvector`** for semantic retrieval and long-term context storage.
 
-### Deployment Model: Multi-User Hosted App
+### Deployment Model: Multi-User, Hosted App + Local Sync Helper
 
-TrojanClaw v2 is a **hosted, multi-user web application**. Any USC student can sign in with Google and get their own workspace:
+TrojanClaw v2 is a **multi-user application**. Any USC student can sign in with Google and get their own workspace. It has two parts:
+
+| Part | Runs on | Responsibilities |
+| :--- | :--- | :--- |
+| **Hosted app** | TrojanClaw server | React UI, FastAPI, Supabase, Google OAuth & Calendar, free-slot engine, Claude scheduler & chat, EngageSC scraping, `.ics` fallback |
+| **Sync Helper** | Each student's computer | Opens the USC SSO / Duo and Piazza login windows, runs the read-only MCP servers, normalizes the results, and uploads them to that student's account |
 
 * Every student is a row in `public.users`, created on first Google sign-in.
 * All ingested data (`student_context_items`, `item_embeddings`, `synced_calendar_events`) carries a `user_id`, and every query, vector search and calendar sync is scoped to the signed-in user.
-* Connectors are chosen so they work from a server with no per-user USC password or Duo prompt: the Brightspace `.ics` feed, Piazza session/demo data, and public EngageSC events.
-
-> This spec is the implementation plan of record. Where it conflicts with the single-user, local-only design in `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md`, this spec wins.
+* **Why a local helper:** SSO + Duo login needs a visible browser window in front of the student, and a hosted server cannot open one on a student's laptop. Login sessions therefore stay on the student's machine. Only normalized academic records (deadlines, announcements, posts) leave it.
+* **MCP connector details** (read-only tool allowlist, blocked tools, `mcp-piazza` settings) follow `SINGLE_USER_MCP_IMPLEMENTATION_PLAN.md` §6 and §15. That plan's single-owner login is replaced here by per-student Google sign-in, and its server-side sync worker is replaced by the Sync Helper (§2.2).
 
 ### End-to-End System Workflow
 
 ```mermaid
 flowchart TD
-    subgraph Data_Sources["Data Ingestion Layer"]
-        BS["Brightspace (.ics Calendar Feed)"]
-        PZ["Piazza (API / Session / Demo Seed)"]
+    subgraph Student_Machine["Student's Computer: TrojanClaw Sync Helper"]
+        Login["Visible Browser Login (USC SSO + Duo, Piazza)"]
+        BSMCP["brightspace-mcp-server (read-only)"]
+        PZMCP["mcp-piazza (read-only)"]
+        Helper["Normalizer & Uploader"]
+    end
+
+    subgraph Data_Sources["Server-Side Sources"]
         ENG["EngageSC (Public Events Scraper)"]
+        ICS["Brightspace .ics Feed (fallback)"]
+        Demo["Demo Seed Dataset (judges)"]
     end
 
     subgraph Backend_Pipeline["FastAPI Backend & VectorDB"]
+        SyncAPI["Sync API (/sync/upload, /sync/jobs)"]
         Parser["Parser & Normalizer Engine"]
         Embedder["Embedding Generator (1536-dim)"]
         SupaDB[("Supabase (PostgreSQL + pgvector)")]
@@ -49,15 +61,24 @@ flowchart TD
         UI_Dash["Dashboard (Timeline + Copilot Chat)"]
     end
 
-    BS --> Parser
-    PZ --> Parser
+    Login --> BSMCP
+    Login --> PZMCP
+    BSMCP --> Helper
+    PZMCP --> Helper
+    Helper -->|Normalized Records + Sync Token| SyncAPI
+    SyncAPI --> Parser
+    SyncAPI -->|Queued Sync Now Jobs| Helper
+
     ENG --> Parser
+    ICS --> Parser
+    Demo --> Parser
 
     Parser --> Embedder
     Embedder --> SupaDB
 
     UI_Auth -->|Store Refresh Token| SupaDB
-    UI_Onboard -->|Submit Feeds & Preferences| Parser
+    UI_Onboard -->|Pair Helper, Preferences, Fallback Feeds| SyncAPI
+    UI_Dash -->|Sync Now| SyncAPI
 
     UI_Dash -->|User Schedule Request| Claude
     GCalSync -->|Busy Windows| SlotEngine
@@ -73,7 +94,11 @@ flowchart TD
 
 ## 2. LOGIN & AUTHENTICATION SPECIFICATION
 
-Automated headless browser scripts (e.g. Playwright / Selenium) entering USC credentials will fail due to USC's Shibboleth SSO and Duo Mobile 2FA push notifications. TrojanClaw solves this with a multi-tiered ingestion model:
+Automated headless browser scripts (e.g. Playwright / Selenium) entering USC credentials will fail due to USC's Shibboleth SSO and Duo Mobile 2FA push notifications, and TrojanClaw should never hold a student's USC password in the first place. So the **student logs in themselves** in a visible browser window on their own computer, and TrojanClaw reads data through that session with read-only MCP servers. Three logins stay separate:
+
+1. **TrojanClaw account:** Google OAuth (§2.1).
+2. **USC Brightspace:** USC SSO + Duo in a visible browser opened by the Sync Helper (§2.2, §2.3).
+3. **Piazza:** Piazza login (including SSO) in a visible browser opened by the Sync Helper (§2.2, §2.4).
 
 ### 2.1 Google OAuth 2.0 (App Identity & Calendar Permissions)
 * **Strategy:** Use Google OAuth as the primary authentication provider.
@@ -85,21 +110,45 @@ Automated headless browser scripts (e.g. Playwright / Selenium) entering USC cre
   * Supabase stores the user's `google_refresh_token` encrypted at rest.
   * When executing background schedule runs, the backend exchanges the refresh token for a short-lived `access_token` using Google's token endpoint (`https://oauth2.googleapis.com/token`).
 
-### 2.2 Brightspace Ingestion
-* **Primary Path (Zero-Friction iCal Feed):**
-  * Brightspace generates a permanent export feed per student containing all course assignments, quizzes, and discussions with exact UTC due dates and descriptions.
-  * **User Action in Onboarding:** Student navigates to `Brightspace -> Calendar -> Settings -> Enable Calendar Feeds -> Subscribe -> Copy URL`.
-  * **Backend Processing:** Ingested via Python `httpx` + `icalendar` + `recurring_ical_events`. Requires no passwords and never expires.
-* **Secondary Path (Session Cookie for Full Announcements):**
-  * Optional field for `d2lSessionVal` and `d2lSecureSessionVal` cookie values, enabling direct queries to the Brightspace D2L Valence REST API (`/d2l/api/le/1.45/{orgUnitId}/news/`).
+### 2.2 User Sync via the TrojanClaw Sync Helper (Primary Path)
 
-### 2.3 Piazza Ingestion
-* **Path 1 (Direct Credentials via `piazza-api`):**
-  * If the student configured an email/password on Piazza, the backend uses the Python `piazza-api` client to call `user_login(email, password)` and extract class feeds.
-* **Path 2 (Session Cookie `session_id`):**
-  * If the student logs into Piazza via Google/SSO, they provide their `session_id` cookie from `piazza.com`. The backend queries `https://piazza.com/logic/api` (`network.get_my_feed`).
-* **Path 3 (Pre-Loaded USC Demo Dataset):**
-  * **Mandatory for Hackathon Judges:** A one-click toggle in the onboarding UI labeled **"Load Sample USC Student Profile (CSCI 567 & CSCI 570)"** that seeds realistic assignments, deadline extensions, and exam notices without requiring active Piazza credentials.
+The Sync Helper (`trojanclaw-sync`) is a small Python program the student runs on their own computer. It owns the USC and Piazza login sessions and the MCP server processes.
+
+1. **Pair the computer (once):**
+   * In onboarding, the student clicks **"Connect this computer"**. The dashboard shows a short one-time pairing code (valid for 10 minutes).
+   * The student runs `trojanclaw-sync pair <code>`. The helper exchanges the code for a per-device **sync token**, stored in the OS keychain. The backend stores only a hash of the token (`sync_devices`, §3.1), and the student can revoke the device from the dashboard.
+2. **Log in (first sync, and whenever a session expires):**
+   * The helper starts `brightspace-mcp-server` with a visible browser (`D2L_HEADLESS=false`). The student completes the **USC SSO + Duo** login in that window.
+   * The helper runs `mcp-piazza login --browser`. The student logs in to Piazza in that window (works for Google/SSO Piazza accounts, so no Piazza password is needed).
+   * Sessions are saved locally by each MCP server. The USC password and session cookies never reach TrojanClaw's servers or Claude.
+3. **Pull and upload:**
+   * The helper calls only the **read-only allowlisted** MCP tools (§2.3, §2.4), parses the JSON results, and normalizes each record into the `student_context_items` shape with a stable `external_id` (Brightspace item ID or Piazza post ID).
+   * It uploads the batch with `POST /sync/upload` and its sync token. The backend resolves the token to the student's `user_id`, upserts on `(user_id, source, external_id)`, and re-embeds only changed items. Re-running a sync never creates duplicates.
+4. **Triggers:**
+   * **"Sync now"** in the dashboard queues a row in `sync_jobs`. The running helper polls `GET /sync/jobs/next` every ~30 seconds and picks it up.
+   * While the helper is running, it also syncs on a schedule (default every 2 hours).
+   * If a USC or Piazza session has expired, the helper reopens the login window and the dashboard shows **"Re-login needed"** with the time of the last good sync.
+
+### 2.3 Brightspace via `brightspace-mcp-server`
+
+* npm package `brightspace-mcp-server` (MIT, Node >= 22), run over stdio. **Pin an exact version**: it releases very often.
+* There is no USC preset. Use the generic SSO path with Duo options (`D2L_HEADLESS=false`, `D2L_DUO_PASSCODE` if needed).
+* Tool results are JSON inside text blocks plus extra "update notice" blocks. The helper parses the JSON and discards the notices.
+* **Read-only allowlist:** courses, assignments and due dates, quizzes, calendar events, announcements/news, content module listings (see the MCP plan §6).
+* **Blocked:** `get-classlist-emails` and `get-roster` (classmates' personal data), all `download-*` tools (they write files), `sign-in`, `sign-out`, `mfa-relay`, and the server's HTTP mode.
+* **Gate before building on it:** USC SSO + Duo through this server is unproven (MCP plan §15.3). Before the connector work starts, run its `setup` once against USC and record whether login succeeds, which Duo method works, and how long the session lasts. If it fails, the `.ics` fallback (§2.5) still covers deadlines.
+
+### 2.4 Piazza via `mcp-piazza`
+
+* Source: `github.com/jadenpxrk/mcp-piazza`, run with `uvx mcp-piazza` over stdio. Read-only, returns structured output.
+* SSO-friendly login with `login --browser` (or `--cookie`), so no Piazza password is stored.
+* Always run with **`PIAZZA_KEEP_UNREAD=true`**, because `get_post` otherwise marks posts as read on the student's account.
+* It is built on the unofficial `piazza-api` and can break without notice. The demo dataset (§2.5) is the safety net for judging.
+
+### 2.5 Fallback Paths
+
+* **Brightspace `.ics` feed (no helper needed):** for students who skip the Sync Helper, or if USC SSO through MCP turns out not to work. The student pastes their Brightspace calendar feed URL (`Brightspace -> Calendar -> Settings -> Enable Calendar Feeds -> Subscribe -> Copy URL`), and the hosted backend fetches it (§5.1). It covers due dates only, not announcements. Store the URL encrypted, since anyone holding it can read the feed.
+* **Pre-Loaded USC Demo Dataset (mandatory for hackathon judges):** a one-click toggle in onboarding labeled **"Load Sample USC Student Profile (CSCI 567 & CSCI 570)"** that seeds realistic assignments, deadline extensions, and exam notices with no USC or Piazza login.
 
 ---
 
@@ -132,12 +181,15 @@ create table public.student_context_items (
     id uuid default gen_random_uuid() primary key,
     user_id uuid references public.users(id) on delete cascade not null,
     source text not null check (source in ('brightspace', 'piazza', 'engagesc')),
+    external_id text not null, -- Brightspace item ID, Piazza post ID, or EngageSC event ID
     course_or_org text,
     title text not null,
     content text not null,
     event_timestamp timestamp with time zone,
     raw_metadata jsonb default '{}'::jsonb,
-    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    unique (user_id, source, external_id) -- lets every sync upsert instead of duplicating
 );
 
 -- 4. Embeddings Storage for Vector Search
@@ -165,7 +217,34 @@ create table public.synced_calendar_events (
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 7. Supabase RPC Function for Cosine Similarity Search
+-- 7. Paired Sync Helper Devices (one row per student computer)
+create table public.sync_devices (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.users(id) on delete cascade not null,
+    device_name text not null,
+    token_hash text unique not null, -- SHA-256 of the sync token; the raw token lives only in the device keychain
+    last_seen_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 8. Sync Jobs ("Sync now" requests and scheduled runs, with status for the dashboard)
+create table public.sync_jobs (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.users(id) on delete cascade not null,
+    device_id uuid references public.sync_devices(id) on delete set null,
+    status text not null default 'queued'
+        check (status in ('queued', 'running', 'succeeded', 'failed', 'needs_login')),
+    sources text[] not null default array['brightspace', 'piazza'],
+    items_upserted int default 0,
+    error text,
+    requested_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone
+);
+create index on public.sync_jobs (user_id, status, requested_at);
+
+-- 9. Supabase RPC Function for Cosine Similarity Search
 create or replace function match_student_context(
     query_embedding vector(1536),
     match_threshold float,
@@ -209,7 +288,7 @@ frontend/src/
 │   ├── PriorityFeed.jsx          # Sorted list of upcoming deadlines & Piazza alerts
 │   ├── CalendarTimeline.jsx      # Day/Week agenda view with free vs scheduled slots
 │   ├── ClaudeChatDrawer.jsx      # Chat copilot interface with prompt suggestions
-│   └── OnboardingModal.jsx       # Connect Brightspace .ics, Piazza, and EngageSC
+│   └── OnboardingModal.jsx       # Pair Sync Helper, EngageSC interests, .ics/demo fallbacks
 ├── pages/
 │   ├── Landing.jsx               # Pitch, features overview, "Sign in with Google"
 │   ├── Onboarding.jsx            # Account connection cards + demo data loader
@@ -228,12 +307,13 @@ frontend/src/
    * Primary CTA: **"Sign In with Google"** with explicit calendar permission badges.
 
 2. **Onboarding Page (`/onboarding`):**
-   * **Brightspace Card:** Paste box for `.ics` URL with an accordion showing screenshots of where to find the link.
-   * **Piazza Card:** Two-tab input: Tab 1 (Email/Password or Session Cookie), Tab 2 (**"Load Sample USC CS Student Feed"** with one click).
+   * **Connect USC Card (Sync Helper):** Install instructions for `trojanclaw-sync`, a **"Connect this computer"** button that shows the one-time pairing code, and live status for the first sync: *Paired → Waiting for USC login → Waiting for Piazza login → Synced N items*.
+   * **Fallback Card:** Tab 1, paste box for the Brightspace `.ics` URL with an accordion showing where to find it. Tab 2, **"Load Sample USC CS Student Feed"** with one click.
    * **EngageSC Card:** Multi-select chips for student interests (*AI/ML, Web Dev, Entrepreneurship, Career Fairs, Social*).
    * **Preferences Card:** Time range slider for study windows (e.g., 5 PM – 9 PM) and maximum continuous block length (default 2 hrs).
 
 3. **Command Center Dashboard (`/dashboard`):**
+   * **Top Bar Sync Status:** last successful sync time per source, a **"Sync now"** button (queues a `sync_jobs` row), and a **"Re-login needed"** banner when the helper reports an expired USC or Piazza session.
    * **Left Column (Academic Priority Feed):**
      * Highlights urgent items (due in < 48 hours).
      * Color-coded course badges (e.g. `[CSCI 570]` in red, `[CSCI 567]` in gold).
@@ -252,7 +332,9 @@ frontend/src/
 
 ## 5. INTEGRATIONS SPECIFICATION
 
-### 5.1 Brightspace Parser (`backend/app/connectors/brightspace.py`)
+### 5.1 Brightspace `.ics` Fallback Parser (`backend/app/connectors/brightspace.py`)
+
+Runs on the hosted backend for students using the `.ics` fallback (§2.5). Students using the Sync Helper get Brightspace data through `brightspace-mcp-server` instead (§2.3, §5.8).
 
 ```python
 import httpx
@@ -284,15 +366,17 @@ def parse_brightspace_feed(ics_url: str) -> list[dict]:
                 dt = datetime.combine(dt, datetime.min.time(), tzinfo=timezone.utc)
             due_iso = dt.isoformat()
             
+        uid = str(event.get('uid', ''))
         extracted.append({
             "source": "brightspace",
+            "external_id": f"ics:{uid}:{due_iso}",  # uid alone repeats across recurring occurrences
             "title": summary,
             "content": f"Assignment: {summary}\nDue Date: {due_iso}\nDetails: {description}",
             "event_timestamp": due_iso,
             "raw_metadata": {
                 "summary": summary,
                 "location": str(event.get('location', '')),
-                "uid": str(event.get('uid', ''))
+                "uid": uid
             }
         })
     return extracted
@@ -300,48 +384,19 @@ def parse_brightspace_feed(ics_url: str) -> list[dict]:
 
 ---
 
-### 5.2 Piazza Connector (`backend/app/connectors/piazza.py`)
+### 5.2 Piazza Demo Seed (`backend/app/connectors/piazza_demo.py`)
+
+Live Piazza data comes from `mcp-piazza` through the Sync Helper (§2.4, §5.8); the hosted backend never logs in to Piazza and never stores a Piazza password. This module only seeds the demo profile (§2.5).
 
 ```python
-from piazza_api import Piazza
-
-def fetch_piazza_posts(email: str, password: str) -> list[dict]:
-    """Logs into Piazza via API and pulls active feed items for enrolled courses."""
-    p = Piazza()
-    p.user_login(email=email, password=password)
-    profile = p.get_user_profile()
-    
-    collected_items = []
-    for course in profile.get('all_classes', []):
-        class_id = course.get('id')
-        class_name = course.get('num', course.get('name', 'Course'))
-        network = p.network(class_id)
-        
-        feed = network.get_feed(limit=15)
-        for post in feed.get('feed', []):
-            subject = post.get('subject', 'No Subject')
-            content_snip = post.get('content_snipet', '')
-            is_pinned = post.get('pinned', False)
-            
-            collected_items.append({
-                "source": "piazza",
-                "course_or_org": class_name,
-                "title": f"[{class_name}] {subject}",
-                "content": f"Piazza Post ({class_name}): {subject}\nSnippet: {content_snip}\nPinned: {is_pinned}",
-                "event_timestamp": post.get('created'),
-                "raw_metadata": {
-                    "post_id": post.get('id'),
-                    "pinned": is_pinned,
-                    "tags": post.get('tags', [])
-                }
-            })
-    return collected_items
+from datetime import datetime, timezone, timedelta
 
 def get_demo_piazza_data() -> list[dict]:
     """Returns curated fallback data for demoing without real Piazza credentials."""
     return [
         {
             "source": "piazza",
+            "external_id": "demo:csci570:hw4-extension",
             "course_or_org": "CSCI 570",
             "title": "[CSCI 570] Homework 4 Deadline Extended",
             "content": "Instructor Announcement: HW4 due date has been extended by 48 hours. New due date is Friday at 11:59 PM PT.",
@@ -350,6 +405,7 @@ def get_demo_piazza_data() -> list[dict]:
         },
         {
             "source": "piazza",
+            "external_id": "demo:csci567:midterm-review",
             "course_or_org": "CSCI 567",
             "title": "[CSCI 567] Midterm Review Session",
             "content": "The midterm review session will be held this Wednesday from 6 PM to 8 PM on Zoom. Recording will be posted.",
@@ -390,6 +446,7 @@ def scrape_engagesc_events() -> list[dict]:
                 when = time_el.get_text(strip=True) if time_el else "Check EngageSC"
                 events.append({
                     "source": "engagesc",
+                    "external_id": f"engagesc:{org}|{title}|{when}",
                     "course_or_org": org,
                     "title": title,
                     "content": f"Campus Club Event: {title}\nHosted by: {org}\nTime: {when}",
@@ -401,6 +458,7 @@ def scrape_engagesc_events() -> list[dict]:
         return [
             {
                 "source": "engagesc",
+                "external_id": "demo:engagesc:cais-tech-talk",
                 "course_or_org": "USC Center for AI in Society (CAIS)",
                 "title": "CAIS Student Branch Tech Talk & Pizza",
                 "content": "Guest speaker from Google DeepMind discussing LLM agents. Free food provided.",
@@ -690,6 +748,109 @@ def overlaps_busy(block: dict, busy_windows: list[dict]) -> bool:
 
 ---
 
+### 5.8 TrojanClaw Sync Helper (`sync_helper/`)
+
+Runs on the student's computer (§2.2). It is the only component that talks to USC Brightspace or Piazza with the student's login.
+
+```text
+sync_helper/
+├── pyproject.toml              # installs the `trojanclaw-sync` command
+└── trojanclaw_sync/
+    ├── cli.py                  # pair | login | run (poll jobs + scheduled sync) | sync-once | status
+    ├── keychain.py             # stores the sync token in the OS keychain (`keyring` package)
+    ├── mcp_clients.py          # starts both MCP servers over stdio and enforces the allowlist
+    ├── normalize.py            # MCP JSON -> student_context_items records with external_id
+    └── uploader.py             # talks to the Sync API below
+```
+
+**Sync API (hosted backend, `backend/app/api/routes/sync.py`):**
+
+| Endpoint | Caller | Purpose |
+| :--- | :--- | :--- |
+| `POST /sync/pairing-codes` | Dashboard (Google session) | Create a one-time pairing code (10-minute expiry) |
+| `POST /sync/pair` | Helper | Exchange the pairing code for a sync token; creates a `sync_devices` row |
+| `GET /sync/jobs/next` | Helper (sync token) | Claim the oldest `queued` job for this student, if any |
+| `POST /sync/jobs/{id}/status` | Helper (sync token) | Report `running`, `succeeded`, `failed` or `needs_login` |
+| `POST /sync/upload` | Helper (sync token) | Upsert one source's normalized records |
+| `POST /sync/jobs` | Dashboard (Google session) | "Sync now": queue a job |
+
+```json
+POST /sync/upload
+Authorization: Bearer <sync token>
+{
+  "job_id": "uuid-or-null",
+  "source": "brightspace",
+  "complete_snapshot": true,
+  "items": [
+    {
+      "external_id": "d2l:assignment:123456",
+      "course_or_org": "CSCI 570",
+      "title": "Homework 4",
+      "content": "Assignment: Homework 4\nDue Date: 2026-11-20T23:59:00-08:00\nDetails: ...",
+      "event_timestamp": "2026-11-20T23:59:00-08:00",
+      "raw_metadata": {"type": "assignment"}
+    }
+  ]
+}
+```
+
+Backend rules for `/sync/upload`:
+* `user_id` comes **only** from the sync token, never from the request body. Revoked devices get `401`.
+* Upsert on `(user_id, source, external_id)` and re-embed only items whose `content` changed.
+* `complete_snapshot: true` means the helper fetched every course for that source successfully. Only then may the backend remove that student's items for the source that are missing from the batch (for example, a deleted assignment). Partial fetches send `false` and nothing is removed.
+* Cap each batch (for example 2,000 items / 2 MB) and reject unknown `source` values.
+* Treat uploaded text as untrusted data. It is shown to Claude as context, never as instructions.
+
+**MCP clients with an enforced allowlist (`mcp_clients.py`):**
+
+```python
+import json
+import os
+from contextlib import asynccontextmanager
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+BRIGHTSPACE_SERVER = StdioServerParameters(
+    command="npx",
+    args=["-y", "brightspace-mcp-server@<pinned-version>"],
+    env={**os.environ, "D2L_HEADLESS": "false"},  # visible browser for USC SSO + Duo
+)
+PIAZZA_SERVER = StdioServerParameters(
+    command="uvx",
+    args=["mcp-piazza"],
+    env={**os.environ, "PIAZZA_KEEP_UNREAD": "true"},  # never mark posts as read
+)
+
+# Read-only tools only (§2.3, §2.4). Fill in the exact names from each server's
+# tools/list output during the USC gate test; anything not listed here is refused.
+ALLOWED_TOOLS: dict[str, set[str]] = {"brightspace": set(), "piazza": set()}
+
+async def call_allowed(session: ClientSession, source: str, tool: str, args: dict) -> list:
+    if tool not in ALLOWED_TOOLS[source]:
+        raise PermissionError(f"{tool} is not on the read-only allowlist for {source}")
+    result = await session.call_tool(tool, args)
+    payloads = []
+    for block in result.content:
+        if block.type != "text":
+            continue
+        try:
+            payloads.append(json.loads(block.text))
+        except json.JSONDecodeError:
+            pass  # drops the server's non-JSON "update notice" blocks
+    return payloads
+
+@asynccontextmanager
+async def open_session(server: StdioServerParameters):
+    """Usage: async with open_session(BRIGHTSPACE_SERVER) as session: ..."""
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
+```
+
+---
+
 ## 6. TEAM SPRINT ROSTER & TASK BREAKDOWN
 
 To divide the work across teammates and parallel AI agents, use this execution split:
@@ -697,7 +858,7 @@ To divide the work across teammates and parallel AI agents, use this execution s
 | Teammate / Agent | Ownership Area | Deliverables |
 | :--- | :--- | :--- |
 | **Teammate 1 (Backend & Auth)** | Google OAuth & Calendar Sync | • Google Cloud OAuth setup<br>• `freebusy` & event insertion endpoints<br>• Free-slot engine (`slots.py`) & schedule validator (`validator.py`)<br>• Supabase token persistence |
-| **Teammate 2 (Connectors & DB)** | Ingestion & Supabase `pgvector` | • Brightspace `.ics` parser<br>• Piazza API connector & demo seed dataset<br>• EngageSC scraper<br>• SQL vector migration |
+| **Teammate 2 (Connectors & DB)** | Sync Helper, ingestion & Supabase `pgvector` | • USC SSO gate test for `brightspace-mcp-server` (§2.3), done first<br>• Sync Helper: pairing, visible-browser login, MCP allowlist, normalizer, uploader (§5.8)<br>• Sync API: pairing, jobs, `/sync/upload` upserts (§5.8)<br>• `.ics` fallback parser & demo seed dataset<br>• EngageSC scraper<br>• SQL migration incl. `sync_devices` & `sync_jobs` |
 | **Teammate 3 (Frontend & AI)** | React UI & Claude Agent | • Vite + Tailwind + Lucide setup<br>• Landing, Onboarding, and Dashboard views<br>• Claude 3.5 Sonnet prompt engineering & chat UI |
 
 ---
@@ -722,6 +883,23 @@ GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
 # Embeddings API Key (Voyage AI or OpenAI)
 EMBEDDING_API_KEY=...
 ```
+
+### Sync Helper (student's computer, `~/.config/trojanclaw-sync/config.env`)
+```env
+# Hosted TrojanClaw backend the helper uploads to
+TROJANCLAW_API_URL=https://your-trojanclaw-backend.example.com
+
+# Brightspace MCP (pin an exact version; USC uses the generic SSO + Duo path)
+BRIGHTSPACE_MCP_VERSION=<pinned-version>
+D2L_HEADLESS=false
+
+# Piazza MCP (never mark posts as read)
+PIAZZA_KEEP_UNREAD=true
+
+# Scheduled sync interval while the helper is running
+SYNC_INTERVAL_MINUTES=120
+```
+The sync token is not in this file. It lives in the OS keychain after `trojanclaw-sync pair`.
 
 ### Frontend (`frontend/.env`)
 ```env
