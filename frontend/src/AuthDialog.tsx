@@ -35,6 +35,13 @@ export default function AuthDialog({ onClose, onSubmit, initialMode = "login", r
     };
   }, []);
 
+  // Put the typing cursor in the first field, so you can type without clicking.
+  // (showModal() would otherwise focus the dialog's first button.)
+  useEffect(() => {
+    if (resumeGoogle) return;
+    dialogRef.current?.querySelector<HTMLInputElement>(isCreatingAccount ? "#auth-name" : "#auth-username")?.focus();
+  }, [isCreatingAccount, resumeGoogle]);
+
   useEffect(() => {
     let active = true;
     authRequest<{ configured: boolean }>("google/config")

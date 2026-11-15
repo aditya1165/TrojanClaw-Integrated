@@ -55,7 +55,8 @@ export function useSources(selected: ConnectorProvider[], onChange: (providers: 
   // Drop sources that stopped working; turn on ones that just connected.
   useEffect(() => {
     if (!connectors) return;
-    const ready = new Set(connectors.filter((item) => item.state === "connected").map((item) => item.provider));
+    // Saved sessions count too: after a restart they show "Session saved" and chat should still use them.
+    const ready = new Set(connectors.filter((item) => usable(item.state)).map((item) => item.provider));
     const next = selected.filter((provider) => usable(connectors.find((item) => item.provider === provider)?.state));
     ready.forEach((provider) => {
       // Newly connected sources are turned on if Settings lists them as defaults.

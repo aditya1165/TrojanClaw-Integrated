@@ -6,7 +6,7 @@ import {
 } from "../lib/api";
 import type { AccountProfile, ChatSaved, ConnectorProvider, ConversationSummary, Source } from "../lib/api";
 import { fromSaved, useChatStream, type ChatItem } from "../lib/chatStream";
-import { effectiveTimezone, useSettings } from "../lib/settings";
+import { effectiveTimezone, readSettings, saveSettings, SIDEBAR, useSettings } from "../lib/settings";
 import { activeSources, INFO, LIVE, useSources, type Sources } from "../lib/sources";
 import { toast } from "../lib/toast";
 import { CalendarProposals } from "../components/Calendar";
@@ -47,6 +47,14 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
   const [showSources, setShowSources] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [drawer, setDrawer] = useState(false); // the sidebar on phones
+  const [sidebarWidth, setSidebarWidth] = useState(() => readSettings().sidebarWidth);
+  const asideRef = useRef<HTMLElement>(null);
+  const clampWidth = (value: number) => Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, Math.round(value)));
+  const resizeTo = (value: number, save = false) => {
+    const width = clampWidth(value);
+    setSidebarWidth(width);
+    if (save) saveSettings({ sidebarWidth: width });
+  };
   const sources = useSources(selectedConnectors, onConnectorsChange);
   const sourceCount = activeSources(sources, selectedConnectors).length;
 
@@ -197,8 +205,33 @@ export default function Chat({ theme, onToggleTheme, onTheme, onHowItWorks, acco
       </header>
       {drawer && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" aria-hidden="true" onClick={() => setDrawer(false)} />}
 
-      <aside aria-label="Sidebar"
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-col gap-2 border-r border-line bg-surface p-4 transition-transform md:static md:z-auto md:w-64 md:max-w-none md:flex-none md:translate-x-0 ${drawer ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside ref={asideRef} aria-label="Sidebar" style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 max-w-[85vw] flex-col gap-2 border-r border-line bg-surface p-4 transition-transform md:relative md:z-auto md:w-[var(--sidebar-w)] md:max-w-none md:flex-none md:translate-x-0 ${drawer ? "translate-x-0" : "-translate-x-full"}`}>
+        {/* Drag (or use the arrow keys) to resize; double-click to reset. */}
+        <div role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabIndex={0}
+          aria-valuemin={SIDEBAR.min} aria-valuemax={SIDEBAR.max} aria-valuenow={sidebarWidth}
+          className="absolute inset-y-0 -right-1 z-10 hidden w-2 cursor-col-resize touch-none hover:bg-line focus-visible:bg-line md:block"
+          onDoubleClick={() => resizeTo(SIDEBAR.default, true)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              resizeTo(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16), true);
+            }
+          }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            const left = asideRef.current?.getBoundingClientRect().left ?? 0;
+            const handle = event.currentTarget;
+            handle.setPointerCapture(event.pointerId);
+            const move = (moveEvent: PointerEvent) => resizeTo(moveEvent.clientX - left);
+            const up = (upEvent: PointerEvent) => {
+              resizeTo(upEvent.clientX - left, true);
+              handle.removeEventListener("pointermove", move);
+              handle.removeEventListener("pointerup", up);
+            };
+            handle.addEventListener("pointermove", move);
+            handle.addEventListener("pointerup", up);
+          }} />
         <div className="mb-3 flex items-center justify-between gap-2">
           <button type="button" onClick={() => openChat(null)} aria-label="Start a new chat" className="rounded-lg">
             <Logo />
@@ -285,6 +318,11 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, status, activity]);
+
+  // Ready to type when a chat opens (not on phones, where it would pop up the keyboard).
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 768px)").matches) focusComposer();
+  }, []);
 
   const submit = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();

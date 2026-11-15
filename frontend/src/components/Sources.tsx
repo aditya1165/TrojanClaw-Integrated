@@ -3,6 +3,7 @@ import type { ConnectorProvider } from "../lib/api";
 import { activeSources, INFO, LIVE, usable, USC, type Sources, type State } from "../lib/sources";
 import { EventsDialog } from "../EngageSCPanel";
 import { Button, CloseIcon, LockIcon } from "./ui";
+import { toast } from "../lib/toast";
 
 const LABEL: Record<State, string> = {
   connected: "Connected", saved: "Session saved", connecting: "Signing in…", needs_login: "Sign-in needed",
@@ -68,6 +69,11 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
   }, [open]);
 
   const manage = () => { setOpen(false); onManage(); };
+  // Connect straight from the menu: the sign-in window opens on this computer.
+  const connectNow = (provider: ConnectorProvider) => {
+    void sources.connect(provider, "connect");
+    toast(`Opening the ${INFO[provider].name} sign-in window on this computer…`);
+  };
   const toggle = (provider: ConnectorProvider, on: boolean) =>
     onChange(on ? [...selected.filter((item) => item !== provider), provider] : selected.filter((item) => item !== provider));
 
@@ -89,9 +95,11 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
                   onChange={(event) => toggle(provider, event.target.checked)} />
               </label>
             ) : (
-              <div key={provider} className={ROW}>
-                <MenuRow id={provider} note={LABEL[state]}>
-                  {state !== "connecting" && <button type="button" className={LINK} onClick={manage}>Connect</button>}
+              <div key={provider} className={ROW} title={sources.messageOf(provider) ?? undefined}>
+                <MenuRow id={provider} note={state === "needs_login" && sources.messageOf(provider) ? sources.messageOf(provider)! : LABEL[state]}>
+                  {state === "connecting" || sources.busy.includes(provider)
+                    ? <span className="flex-none text-[13px] text-muted">Signing in…</span>
+                    : <button type="button" className={LINK} onClick={() => connectNow(provider)}>{state === "needs_login" ? "Sign in" : "Connect"}</button>}
                 </MenuRow>
               </div>
             );
@@ -104,7 +112,12 @@ export function SourcesMenu({ sources, selected, onChange, onManage }: {
           </label>
           <div className={ROW}>
             <MenuRow id="calendar" note={sources.calendar?.connected ? "Drafts events for your approval" : "Not connected"}>
-              {!sources.calendar?.connected && <button type="button" className={LINK} onClick={manage}>Connect</button>}
+              {!sources.calendar?.connected && (
+                <button type="button" className={LINK} disabled={!sources.calendar?.configured || sources.busy.includes("calendar")}
+                  onClick={() => void sources.setCalendar(true)}>
+                  {sources.busy.includes("calendar") ? "Opening…" : "Connect"}
+                </button>
+              )}
             </MenuRow>
           </div>
           {sources.error && <p role="alert" className="px-3 py-2 text-xs text-error">{sources.error}</p>}

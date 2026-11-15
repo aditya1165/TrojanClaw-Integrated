@@ -5,10 +5,12 @@ import type { ConnectorProvider } from "./api";
 export interface Settings {
   timezone: string; // "" follows this computer's time zone
   defaultSources: ConnectorProvider[]; // turned on for chat when they connect
+  sidebarWidth: number; // px, on screens wide enough to show the sidebar
 }
 
 const KEY = "tc-settings";
-const DEFAULTS: Settings = { timezone: "", defaultSources: ["brightspace", "handshake", "piazza"] };
+export const SIDEBAR = { min: 220, max: 440, default: 256 };
+const DEFAULTS: Settings = { timezone: "", defaultSources: ["brightspace", "handshake", "piazza"], sidebarWidth: SIDEBAR.default };
 
 export function readSettings(): Settings {
   try {
@@ -16,6 +18,8 @@ export function readSettings(): Settings {
     return {
       timezone: typeof saved.timezone === "string" ? saved.timezone : DEFAULTS.timezone,
       defaultSources: Array.isArray(saved.defaultSources) ? saved.defaultSources : DEFAULTS.defaultSources,
+      sidebarWidth: typeof saved.sidebarWidth === "number"
+        ? Math.min(SIDEBAR.max, Math.max(SIDEBAR.min, saved.sidebarWidth)) : DEFAULTS.sidebarWidth,
     };
   } catch {
     return DEFAULTS;
