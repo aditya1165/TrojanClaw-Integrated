@@ -96,7 +96,7 @@ Chat runs one Claude agent (`backend/app/agent/runtime.py`, configured in `confi
 - **TrojanClaw MCP tools** (`backend/app/mcp_server/server.py`), bound to the signed-in account: `list_deadlines`, `list_announcements`, `search_student_context`, `search_campus_knowledge`, `list_campus_events`, `get_data_status`.
 - **Connector tools** for each live connector, named `brightspace__<tool>`, `handshake__<tool>` and `piazza__<tool>`. A connector is included when:
   - it is turned on in chat (the request's `connectors` list), and
-  - its state is **Session saved** or **Connected** for the signed-in account, and the request comes from this computer (the same loopback and origin check as the connector endpoints).
+  - its state is **Session saved** or **Connected** for the signed-in account. Authenticated chat may read the selected saved sources through the public frontend as well as locally.
 
   Connectors are also limited by `goals.chat.connectors` in `config/agent.yaml`. A turned-on source with an expired session is skipped rather than failing the reply.
 
@@ -151,7 +151,7 @@ Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read 
 - `POST /integrations/{provider}/verify`: checks a saved session.
 - `POST /chat`: runs the agent for the signed-in account and streams the reply. Takes `{conversation_id, message, connectors, timezone}`: leave out `conversation_id` to start a new saved chat; `connectors` lists the sources turned on in chat (from another computer, any connector is refused); `timezone` (IANA name, default `America/Los_Angeles`) sets the dates the agent uses. The reply is newline-delimited JSON ending in `done` with `{response, sources, calendar_proposals, conversation_id, title}`. Tool rounds are capped by `max_tool_rounds` in `config/agent.yaml`. The full chat API is in [backend/README.md](backend/README.md#chats).
 
-Login, verification, and connector chat requests (including automatic use of saved sessions) require a loopback client and an allowed frontend origin. Keep `CORS_ORIGINS` limited to the local frontend. Only one sign-in job per connector can run in a backend process at a time.
+Login and verification allow a loopback client or the exact public frontend configured by `MCP_PUBLIC_URL`. Public requests must have both that Host and that Origin, and the origin must be listed in `CORS_ORIGINS`; missing/unapproved origins and unrelated hosts are rejected. Ngrok forwards the visitor's IP, so loopback alone cannot identify an approved tunnel request. Sign-in windows still open on the computer running the backend. Authenticated chat reads only the signed-in account's selected sources, without an IP restriction. Only one sign-in job per connector can run in a backend process at a time.
 
 ```sh
 uv run --locked --project integrations/handshake --group dev pytest integrations/handshake/tests -q

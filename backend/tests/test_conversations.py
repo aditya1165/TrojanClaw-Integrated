@@ -82,6 +82,7 @@ class FakeChatService:
 
     async def chat(self, request, *, user_id, use_saved_connectors=False, conversation_id=None, emit=None,
                    allowed_connectors=None):
+        self.owner, self.saved = user_id, use_saved_connectors
         self.allowed = allowed_connectors
         emit({"type": "activity", "text": "Checking Brightspace: upcoming due dates"})
         if self.fail:
@@ -122,6 +123,15 @@ def setup():
     yield state
     for dependency in (get_conversation_repository, get_chat_service):
         app.dependency_overrides.pop(dependency, None)
+
+
+def test_remote_chat_uses_only_the_signed_in_accounts_selected_sources(setup):
+    with TestClient(app, client=("203.0.113.25",1234)) as client:
+        result = done(client, {"message":"My Handshake events?", "connectors":["handshake"]})
+    assert result["response"] == "Answer 1"
+    assert setup["service"].owner == USER
+    assert setup["service"].saved is True
+    assert setup["service"].allowed == ["handshake"]
 
 
 def test_first_message_creates_a_chat_and_later_messages_get_its_history(setup):

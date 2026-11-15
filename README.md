@@ -209,6 +209,7 @@ TrojanClaw_v2/
 | :--- | :--- |
 | [CONNECTORS.md](CONNECTORS.md) | Signing in, per-account sessions, WebReg, how chat uses connectors |
 | [backend/README.md](backend/README.md) | Backend setup and the chat API (streaming, saved chats, uploads) |
+| [backend/SIRI_SHORTCUTS.md](backend/SIRI_SHORTCUTS.md) | Siri voice questions through Apple Shortcuts, without a native app |
 | [docs/google-calendar.md](docs/google-calendar.md) | Google OAuth setup, drafts and approval |
 | [docs/brightspace.md](docs/brightspace.md) · [docs/handshake.md](docs/handshake.md) · [docs/piazza.md](docs/piazza.md) | What each connector can read |
 | [TrojanClaw_v2_Architecture_and_Spec.md](TrojanClaw_v2_Architecture_and_Spec.md) | Full architecture and roadmap |

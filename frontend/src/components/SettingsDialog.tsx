@@ -4,6 +4,7 @@ import { browserTimezone, saveSettings, useSettings } from "../lib/settings";
 import type { Theme } from "../theme";
 import { Button, CloseIcon } from "./ui";
 import { AssistantConnection } from "./AssistantConsent";
+import { SiriConnection } from "./SiriConnection";
 
 const SHORTCUTS: [string, string][] = [["⌘ K", "New chat"], ["⌘ /", "Type a message"], ["⌘ ⇧ F", "Search chats"], ["Esc", "Close a window"]];
 const SOURCES: [ConnectorProvider, string][] = [["brightspace", "Brightspace"], ["handshake", "Handshake"], ["piazza", "Piazza"]];
@@ -76,6 +77,7 @@ export default function SettingsDialog({ account, theme, onTheme, onSignOut, sig
         </Section>
 
         <AssistantConnection key={`assistant-${account.id}`} />
+        <SiriConnection key={`siri-${account.id}`} />
 
         <Section title="Keyboard shortcuts" note="Use Ctrl instead of ⌘ on Windows.">
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">

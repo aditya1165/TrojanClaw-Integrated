@@ -103,7 +103,7 @@ class AuthService:
                 return self._new_session(cursor, str(user_id), old_token)
 
     def current_user(self, token: str | None) -> AccountProfile:
-        if not token or len(token) > 128 or token.startswith(("tc_pair_", "tc_mcp_", "tc_oauth_")):
+        if not token or len(token) > 128 or token.startswith(("tc_pair_", "tc_mcp_", "tc_oauth_", "tc_siri_")):
             raise HTTPException(401, "Please sign in.")
         with self.database.connection() as connection:
             with connection.cursor() as cursor:

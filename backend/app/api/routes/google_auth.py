@@ -1,6 +1,7 @@
 """Google-first USC onboarding. No calendar writes occur during sign-in."""
 
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
@@ -21,6 +22,12 @@ router = APIRouter(prefix="/auth/google", tags=["auth"])
 logger = logging.getLogger(__name__)
 
 
+def public_frontend(request: Request):
+    public = (get_settings().mcp_public_url or "").rstrip("/")
+    parsed = urlsplit(public)
+    return public if parsed.scheme == "https" and parsed.netloc == request.url.netloc else None
+
+
 @router.get("/config")
 def config(response: Response, calendar: GoogleCalendar = Depends(get_calendar_service)) -> dict[str, bool]:
     response.headers["Cache-Control"] = "no-store"
@@ -30,7 +37,12 @@ def config(response: Response, calendar: GoogleCalendar = Depends(get_calendar_s
 @router.post("/start", response_model=CalendarConnect,
              dependencies=[Depends(require_trusted_origin), Depends(require_local_request), Depends(limit_auth_attempts)])
 def start(request: Request, response: Response):
-    token, url = google_signin.start(request.cookies.get(GOOGLE_ATTEMPT_COOKIE))
+    public = public_frontend(request)
+    if public and request.headers.get("origin") == public:
+        token, url = google_signin.start(request.cookies.get(GOOGLE_ATTEMPT_COOKIE),
+            redirect_uri=public + "/auth/google/callback", frontend_url=public)
+    else:
+        token, url = google_signin.start(request.cookies.get(GOOGLE_ATTEMPT_COOKIE))
     response.set_cookie(GOOGLE_ATTEMPT_COOKIE, token, max_age=1200, httponly=True,
                         secure=get_settings().app_env not in {"development", "test"}, samesite="lax", path="/auth/google")
     response.headers["Cache-Control"] = "no-store"
@@ -41,11 +53,13 @@ def start(request: Request, response: Response):
 def callback(request: Request, state: str = Query(default="", max_length=200),
              code: str | None = Query(default=None, max_length=4096), error: str | None = Query(default=None, max_length=200)):
     outcome = "ready"
+    destination = (google_signin.frontend_destination(request.cookies.get(GOOGLE_ATTEMPT_COOKIE))
+                   or public_frontend(request) or get_settings().google_calendar_frontend_url)
     try:
         google_signin.callback(request.cookies.get(GOOGLE_ATTEMPT_COOKIE), state, code, error)
     except (AppError, ConfigurationError):
         outcome = "error"
-    return RedirectResponse(get_settings().google_calendar_frontend_url + "?google_signin=" + outcome,
+    return RedirectResponse(destination + "?google_signin=" + outcome,
                             status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 

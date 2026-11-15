@@ -31,6 +31,8 @@ class GoogleAttempt:
     encrypted_tokens: str | None = None
     usc_attempt_id: str | None = None
     detail: str | None = None
+    redirect_uri: str | None = None
+    frontend_url: str | None = None
 
 
 class GoogleSignIn:
@@ -49,10 +51,11 @@ class GoogleSignIn:
             raise AppError("This Google sign-in expired. Please start again.", "google_signin_expired", 400)
         return attempt
 
-    def start(self, old_token=None):
+    def start(self, old_token=None, *, redirect_uri=None, frontend_url=None):
         calendar = self.calendar_factory()
         state, verifier, token = secrets.token_urlsafe(32), secrets.token_urlsafe(64), secrets.token_urlsafe(32)
-        url = calendar.authorization_url(state, verifier, redirect_uri=calendar.settings.google_signin_redirect_uri, signin=True)
+        redirect_uri = redirect_uri or calendar.settings.google_signin_redirect_uri
+        url = calendar.authorization_url(state, verifier, redirect_uri=redirect_uri, signin=True)
         with self.lock:
             now = time.monotonic()
             self.attempts = {key: value for key, value in self.attempts.items() if now - value.started <= ATTEMPT_SECONDS}
@@ -60,8 +63,16 @@ class GoogleSignIn:
                 self.attempts.pop(token_hash(old_token), None)
             if len(self.attempts) >= 100:
                 raise AppError("Too many sign-in attempts. Please try again shortly.", "google_signin_busy", 429)
-            self.attempts[token_hash(token)] = GoogleAttempt(token_hash(state), verifier)
+            self.attempts[token_hash(token)] = GoogleAttempt(token_hash(state), verifier,
+                redirect_uri=redirect_uri, frontend_url=frontend_url)
         return token, url
+
+    def frontend_destination(self, token):
+        with self.lock:
+            try:
+                return self._get(token).frontend_url
+            except AppError:
+                return None
 
     def callback(self, token, state, code, error=None):
         with self.lock:
@@ -73,7 +84,8 @@ class GoogleSignIn:
             if error or not code:
                 raise AppError("Google sign-in was cancelled. You can try again.", "google_signin_cancelled", 400)
             calendar = self.calendar_factory()
-            tokens = calendar.exchange(code, attempt.verifier, redirect_uri=calendar.settings.google_signin_redirect_uri)
+            tokens = calendar.exchange(code, attempt.verifier,
+                redirect_uri=attempt.redirect_uri or calendar.settings.google_signin_redirect_uri)
             email = calendar.google_identity(tokens)
             encrypted = calendar.encrypt(tokens)
             with self.lock:

@@ -62,6 +62,41 @@ def test_google_start_requests_usc_hint_pkce_and_identity_scopes(setup):
     calendar.complete_connection.assert_not_called()
 
 
+def test_public_signin_keeps_callback_exchange_and_return_on_the_public_origin(setup, monkeypatch):
+    from app.api.routes import auth, integrations
+    flow, calendar, usc = setup
+    public = "https://tunnel.example"
+    settings = SimpleNamespace(mcp_public_url=public, cors_origins=[public], app_env="test",
+        google_calendar_frontend_url="http://localhost:5173")
+    for module in (routes, auth, integrations):
+        monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "google_signin", flow)
+    client = TestClient(app, base_url=public, client=("203.0.113.25",1234))
+    result = client.post("/auth/google/start", headers={"Origin":public})
+    assert result.status_code == 200
+    parameters = parse_qs(urlparse(result.json()["url"]).query)
+    callback = public + "/auth/google/callback"
+    assert parameters["redirect_uri"] == [callback]
+    response = client.get("/auth/google/callback", params={"state":parameters["state"][0], "code":"test-code"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == public+"?google_signin=ready"
+    assert calendar.exchange.call_args.kwargs["redirect_uri"] == callback
+    profile = AccountProfile(id=UUID(int=2), name="Tommy Trojan", username="ttrojan")
+    usc.take.return_value.account = profile
+    auth_service = MagicMock()
+    auth_service.start_session.return_value = "public-session"
+    auth_service.current_user.return_value = profile
+    monkeypatch.setitem(app.dependency_overrides, get_auth_service, lambda: auth_service)
+    monkeypatch.setitem(app.dependency_overrides, get_calendar_service, lambda: calendar)
+    headers = {"Origin":public}
+    finish = client.post("/auth/google/finish", headers=headers, json={})
+    result = client.post("/auth/google/status", headers=headers, json={"attempt_id":finish.json()["attempt_id"]})
+    assert result.status_code == 200
+    assert client.cookies.get(COOKIE_NAME) == "public-session"
+    assert client.get("/auth/me").status_code == 200
+    auth_service.current_user.assert_called_with("public-session")
+
+
 def test_combined_flow_encrypts_tokens_and_starts_brightspace_once(setup):
     flow, calendar, usc = setup
     token, url, state = begin(flow)

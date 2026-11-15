@@ -65,6 +65,7 @@ class Settings:
     google_calendar_encryption_key: str | None = None
     mcp_public_url: str | None = None
     mcp_encryption_key: str | None = None
+    siri_public_url: str | None = None
 
     @property
     def google_signin_redirect_uri(self) -> str:
@@ -100,6 +101,7 @@ class Settings:
             google_calendar_encryption_key=_optional("GOOGLE_CALENDAR_ENCRYPTION_KEY"),
             mcp_public_url=_optional("MCP_PUBLIC_URL"),
             mcp_encryption_key=_optional("MCP_ENCRYPTION_KEY"),
+            siri_public_url=_optional("SIRI_PUBLIC_URL"),
             config_dir=Path(os.getenv("TROJANCLAW_CONFIG_DIR", "").strip() or REPOSITORY_DIR),
         )
         settings.validate()

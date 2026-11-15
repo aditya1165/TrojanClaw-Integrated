@@ -32,6 +32,10 @@ class AuthRateLimiter:
 
     def check(self, request: Request) -> None:
         key = request.client.host if request.client else "unknown"
+        self.check_key(key)
+
+    def check_key(self, key: str) -> None:
+        """Apply the same bounded limiter to an authenticated account when needed."""
         now = monotonic()
         with self.lock:
             attempts = self.attempts.setdefault(key, deque())
