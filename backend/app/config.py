@@ -63,6 +63,8 @@ class Settings:
     google_calendar_redirect_uri: str = "http://localhost:8000/calendar/callback"
     google_calendar_frontend_url: str = "http://localhost:5173"
     google_calendar_encryption_key: str | None = None
+    mcp_public_url: str | None = None
+    mcp_encryption_key: str | None = None
 
     @property
     def google_signin_redirect_uri(self) -> str:
@@ -96,6 +98,8 @@ class Settings:
             google_calendar_redirect_uri=os.getenv("GOOGLE_CALENDAR_REDIRECT_URI", "http://localhost:8000/calendar/callback").strip(),
             google_calendar_frontend_url=os.getenv("GOOGLE_CALENDAR_FRONTEND_URL", "http://localhost:5173").strip().rstrip("/"),
             google_calendar_encryption_key=_optional("GOOGLE_CALENDAR_ENCRYPTION_KEY"),
+            mcp_public_url=_optional("MCP_PUBLIC_URL"),
+            mcp_encryption_key=_optional("MCP_ENCRYPTION_KEY"),
             config_dir=Path(os.getenv("TROJANCLAW_CONFIG_DIR", "").strip() or REPOSITORY_DIR),
         )
         settings.validate()

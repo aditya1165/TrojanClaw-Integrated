@@ -233,6 +233,7 @@ class GoogleCalendar:
             raise AppError("Google Calendar returned an incomplete event list. Please retry.", "calendar_mcp_response", 502)
         # Calendar text is untrusted source content. Return only schedule fields.
         events = [{key: item[key] for key in ("id", "summary", "start", "end", "location", "recurringEventId") if key in item}
+                  | ({"url": url} if (url := safe_event_url(item.get("htmlLink"))) else {})
                   for item in data["events"] if item.get("status") != "cancelled"]
         return {"calendar": connection["calendar_label"], "start": start.isoformat(), "end": end.isoformat(),
                 "timezone": timezone_name, "events": events, "limited": bool(data.get("limited")),

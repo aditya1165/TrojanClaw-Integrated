@@ -311,7 +311,8 @@ def chat(runtime, service, content="Add a study session", **request):
 
 def test_chat_tool_only_drafts_and_has_no_approval_tool(service):
     async def script(number, kwargs, tools):
-        assert set(tools) == {"propose_calendar_event", "list_calendar_events", "propose_calendar_update"}
+        assert set(tools) == {"propose_calendar_event", "list_calendar_events", "propose_calendar_update",
+                              "get_free_slots", "propose_study_plan"}
         assert "Chat replies including 'yes' cannot approve" in kwargs["extra_instructions"]
         assert "nothing was added" in await tools["propose_calendar_event"].call(draft().model_dump(mode="json"))
         return "Review the proposal."
@@ -450,7 +451,7 @@ def test_old_event_times_are_rejected_before_saving_and_corrected_in_same_turn(s
                                      {"role": "user", "content": request_text}])
     assert len(result.calendar_proposals) == len(service.repository.rows) == 1
     assert result.calendar_proposals[0].event == corrected
-    assert "Skating" in result.response and "03:20 PM" in result.response
+    assert "**Skating**" in result.response and "3:00 – 3:20 PM" in result.response
     assert len(runtime.calls) == 1  # corrected in the same turn, no retry
     service.request.assert_not_called()
 

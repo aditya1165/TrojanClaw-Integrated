@@ -3,6 +3,7 @@ import type { AccountProfile, ConnectorProvider } from "../lib/api";
 import { browserTimezone, saveSettings, useSettings } from "../lib/settings";
 import type { Theme } from "../theme";
 import { Button, CloseIcon } from "./ui";
+import { AssistantConnection } from "./AssistantConsent";
 
 const SHORTCUTS: [string, string][] = [["⌘ K", "New chat"], ["⌘ /", "Type a message"], ["⌘ ⇧ F", "Search chats"], ["Esc", "Close a window"]];
 const SOURCES: [ConnectorProvider, string][] = [["brightspace", "Brightspace"], ["handshake", "Handshake"], ["piazza", "Piazza"]];
@@ -73,6 +74,8 @@ export default function SettingsDialog({ account, theme, onTheme, onSignOut, sig
             </label>
           ))}
         </Section>
+
+        <AssistantConnection key={`assistant-${account.id}`} />
 
         <Section title="Keyboard shortcuts" note="Use Ctrl instead of ⌘ on Windows.">
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">

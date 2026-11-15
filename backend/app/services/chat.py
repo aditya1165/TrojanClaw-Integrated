@@ -11,6 +11,7 @@ import json
 import re
 from typing import Any
 from uuid import UUID
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from anthropic.lib.tools import ToolError, beta_async_tool
@@ -23,6 +24,10 @@ from app.models.chat import ChatRequest, ChatResponse, Source
 from app.services.calendar import PROPOSE_TOOL, LIST_EVENTS_TOOL, UPDATE_EVENT_TOOL, GoogleCalendar
 from app.services.calendar_intent import validate_latest_times
 from app.services.sources import activity_for
+from app.services.study_plan import (
+    FREE_SLOTS_TOOL, PLAN_TOOL, Slot, StudyPlanRequest, busy_intervals, describe_slots, free_slots,
+    get_scheduling_config, parse_window, place_blocks, validation_message,
+)
 
 
 ASK_CALENDAR_DETAILS = {
@@ -57,7 +62,11 @@ CALENDAR_ON = (
     "use 15 minutes and a popup at start, stating those assumptions. At most 52 occurrences within a year; preserve local times across DST. "
     "To edit an existing timed event, first list events to obtain its exact ID, then call propose_calendar_update with only the changed fields. "
     "Ask whether a recurring edit should affect one occurrence or the entire series. Never create a new event as a substitute for editing. "
-    "Both additions and updates require a review card and the student's approval."
+    "Both additions and updates require a review card and the student's approval.\n"
+    "Study plans: to plan study time across several days (for example 'plan my week' or 'when should I work on HW4'), "
+    "find the deadlines first, then call get_free_slots, then call propose_study_plan ONCE with all blocks. That one "
+    "call is this turn's review card; do not also use propose_calendar_event for plan blocks. Pick slot IDs and "
+    "minutes only; never compute or invent times."
 )
 CALENDAR_OFF = (
     "Google Calendar is not configured. You cannot save or change calendar events; never claim you did."
@@ -94,6 +103,7 @@ class ChatService:
         self, request: ChatRequest, *, user_id: UUID, use_saved_connectors: bool = False,
         conversation_id: UUID | None = None, emit: Callable[[dict[str, Any]], None] | None = None,
         allowed_connectors: list[str] | None = None,
+        allow_calendar_drafts: bool = True,
     ) -> ChatResponse:
         """`conversation_id` ties calendar drafts to the saved chat. `emit`, when given,
         receives progress as the reply streams (see AgentRuntime.run). `allowed_connectors`
@@ -102,17 +112,20 @@ class ChatService:
         messages = [{"role": message.role.value,
                      "content": message.blocks + [{"type": "text", "text": message.content}] if message.blocks else message.content}
                     for message in request.messages]
-        calendar = self._calendar if self._calendar is not None and self._calendar.configured else None
+        calendar = self._calendar if allow_calendar_drafts and self._calendar is not None and self._calendar.configured else None
         proposals: list[CalendarProposal] = []
         questions: list[str] = []
         rejected: list[str] = []  # drafts refused because their times didn't match the latest message
         latest = request.messages[-1].content
         lock = asyncio.Lock()
+        calendar_links: set[str] = set()  # event links the calendar read returned (for reply cards)
         calendar_tools = [
             _propose_tool(calendar, user_id, latest, proposals, rejected, lock, conversation_id, emit),
-            _list_tool(calendar, user_id, request.timezone, emit),
+            _list_tool(calendar, user_id, request.timezone, emit, calendar_links),
             _update_tool(calendar, user_id, request.timezone, latest, proposals, rejected, lock, conversation_id, emit),
         ] if calendar else []
+        # Study planning (only in the main run; the narrow retry below is for single events).
+        plan_tools = _plan_tools(calendar, user_id, request.timezone, proposals, lock, conversation_id, emit) if calendar else []
         webreg = _webreg_tool(user_id, emit)
         other_tools = [webreg] if webreg else []
         streaming = {"on_event": emit} if emit else {}
@@ -126,8 +139,9 @@ class ChatService:
             connectors=request.connectors,
             use_saved_connectors=use_saved_connectors,
             timezone=request.timezone,
-            extra_tools=calendar_tools + other_tools,
+            extra_tools=calendar_tools + plan_tools + other_tools,
             extra_instructions=CALENDAR_ON if calendar else CALENDAR_OFF,
+            extra_links=calendar_links,
             **streaming,
         )
         text = result.text
@@ -153,29 +167,143 @@ class ChatService:
                     if rejected or claims_new_calendar_draft(retry.text) else retry.text
                 )
 
-        if proposals:
-            event = proposals[0].event
-            zone = ZoneInfo(event.timezone)
-            start = event.start.astimezone(zone).strftime("%b %d, %Y, %I:%M %p")
-            end = event.end.astimezone(zone).strftime("%b %d, %Y, %I:%M %p")
-            text = (
-                f"I've prepared a new calendar proposal: {event.title}, {start} – {end} ({event.timezone}). "
-                + ("Review the before/after details and choose Approve changes to update the existing event."
-                   if proposals[0].operation == "update" else "Review the event below and choose Approve addition to save it.")
-            )
-            if event.recurrence:
-                recurrence = event.recurrence
-                text += f" Repeats {recurrence.frequency.lower()}, every {recurrence.interval} interval(s)"
-                if recurrence.weekdays:
-                    text += " on " + ", ".join(recurrence.weekdays)
-                text += (f", {recurrence.count} occurrences." if recurrence.count else f", through {recurrence.until.isoformat()}.")
-            if event.reminder_minutes is not None:
-                text += f" Popup reminder: {event.reminder_minutes} minutes before start."
+        if len(proposals) > 1:
+            text = plan_reply(text, proposals)
+        elif proposals:
+            text = draft_reply(proposals[0])
         return ChatResponse(
             response=text,
             sources=[Source(**source) for source in result.sources],
             calendar_proposals=proposals,
         )
+
+
+_WEEKDAYS = {"MO": "Mon", "TU": "Tue", "WE": "Wed", "TH": "Thu", "FR": "Fri", "SA": "Sat", "SU": "Sun"}
+
+
+def _when(event: CalendarEventDraft) -> str:
+    """'Mon, Nov 16, 3:00 – 3:20 PM PST' (one date when start and end are on the same day)."""
+    zone = ZoneInfo(event.timezone)
+    start, end = event.start.astimezone(zone), event.end.astimezone(zone)
+
+    def clock(value: datetime) -> str:
+        return f"{value.hour % 12 or 12}:{value:%M %p}"
+
+    day = f"{start:%a, %b} {start.day}"
+    if start.date() == end.date():
+        first = clock(start).removesuffix(f" {start:%p}") if f"{start:%p}" == f"{end:%p}" else clock(start)
+        return f"{day}, {first} – {clock(end)} {end:%Z}"
+    return f"{day}, {clock(start)} – {end:%a, %b} {end.day}, {clock(end)} {end:%Z}"
+
+
+def draft_reply(proposal: CalendarProposal) -> str:
+    """The reply that goes with a draft card: the essentials, and what the student does next."""
+    event = proposal.event
+    if proposal.operation == "update":
+        return (f"I've prepared the changes to **{event.title}**: {_when(event)}. Review the before and after below, "
+                "then choose **Approve changes** to update it in Google Calendar.")
+    repeats = ""
+    if rule := event.recurrence:
+        unit = {"DAILY": "day", "WEEKLY": "week", "MONTHLY": "month"}[rule.frequency]
+        repeats = f" Repeats {rule.frequency.lower()}" if rule.interval == 1 else f" Repeats every {rule.interval} {unit}s"
+        if rule.weekdays:
+            repeats += " on " + ", ".join(_WEEKDAYS.get(day, day) for day in rule.weekdays)
+        repeats += f", {rule.count} times." if rule.count else (f", until {rule.until:%b} {rule.until.day}." if rule.until else ".")
+    return (f"I've prepared a new calendar proposal for **{event.title}** on {_when(event)}.{repeats} "
+            "Review it below and choose **Approve addition** to add it to Google Calendar. Nothing changes until you approve.")
+
+
+def plan_reply(text: str, proposals: list[CalendarProposal]) -> str:
+    """Claude's explanation of the plan, then what the student does next."""
+    minutes = sum(int((p.event.end - p.event.start).total_seconds() // 60) for p in proposals)
+    hours = f"{minutes // 60} hr {minutes % 60} min" if minutes % 60 else f"{minutes // 60} hr"
+    return ((text.strip() + "\n\n") if text.strip() else "") + (
+        f"I've drafted **{len(proposals)} study blocks** ({hours} in all) around your calendar. Review the plan below, "
+        "then choose **Add all to Google Calendar**, or remove any block first. Nothing changes until you approve."
+    )
+
+
+def _plan_tools(
+    calendar: GoogleCalendar, user_id: UUID, timezone: str, proposals: list[CalendarProposal], lock: asyncio.Lock,
+    conversation_id: UUID | None = None, emit: Callable[[dict[str, Any]], None] | None = None,
+) -> list[Any]:
+    """get_free_slots and propose_study_plan (see app/services/study_plan.py). They share the slots found."""
+    slots: dict[str, Slot] = {}
+
+    def clock(value: Any, name: str) -> time | None:
+        if value in (None, ""):
+            return None
+        try:
+            hours, minutes = str(value).split(":")
+            return time(int(hours), int(minutes))
+        except ValueError:
+            raise ToolError(f"{name} must look like 18:00.") from None
+
+    async def find(**arguments: Any) -> str:
+        if emit:
+            emit({"type": "activity", "text": activity_for(FREE_SLOTS_TOOL["name"])})
+        config, zone = get_scheduling_config(), ZoneInfo(timezone)
+        now = datetime.now(zone)
+        try:
+            start, end = parse_window(arguments, timezone, config, now)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from None
+        earliest, latest = clock(arguments.get("earliest"), "earliest"), clock(arguments.get("latest"), "latest")
+        try:
+            data = await asyncio.to_thread(calendar.list_events, user_id, CalendarEventQuery(start=start, end=end), timezone)
+        except AppError as exc:
+            raise ToolError(exc.message) from None
+        found = free_slots(busy_intervals(data.get("events") or []), start, end, zone, config, now=now,
+                           earliest=earliest, latest=latest, min_minutes=arguments.get("min_minutes"))
+        slots.clear()
+        slots.update({slot.id: slot for slot in found})
+        return json.dumps({
+            "timezone": timezone, "calendar": data.get("calendar"),
+            "period": {"start": start.isoformat(), "end": end.isoformat()},
+            "slots": describe_slots(found, zone),
+            "rules": {"block_minutes": [config.min_block_minutes, config.max_block_minutes],
+                      "buffer_minutes": config.buffer_minutes, "max_study_minutes_per_day": config.max_study_minutes_per_day,
+                      "max_blocks": config.max_blocks_per_plan},
+            "note": ("Use these slot IDs in propose_study_plan (a new call replaces earlier IDs). All-day events do not "
+                     "block study time." + (" The calendar returned many events; a shorter period is more reliable."
+                                            if data.get("limited") else "")),
+        })
+
+    async def plan(**arguments: Any) -> str:
+        if emit:
+            emit({"type": "activity", "text": activity_for(PLAN_TOOL["name"])})
+        async with lock:  # one review card (or one plan) per reply
+            if not slots:
+                raise ToolError("Call get_free_slots first in this turn, then pick its slot IDs.")
+            if proposals:
+                raise ToolError("A calendar card was already created for this message. Ask the student to review it.")
+            try:
+                request = StudyPlanRequest.model_validate(arguments)
+            except ValidationError as exc:
+                raise ToolError("Invalid plan: " + validation_message(exc)) from None
+            result = place_blocks(request, slots, timezone, get_scheduling_config())
+            if result.problems:
+                raise ToolError("No blocks were drafted. Fix these and call propose_study_plan again: "
+                                + " ".join(result.problems))
+            try:
+                for event in result.events:
+                    proposals.append(await asyncio.to_thread(calendar.propose, user_id, event, conversation_id))
+            except AppError as exc:
+                raise ToolError(exc.message) from None
+            total = sum(int((p.event.end - p.event.start).total_seconds() // 60) for p in proposals)
+            return json.dumps({
+                "drafted": len(proposals), "total_minutes": total,
+                "note": "Draft only; nothing was added to Google Calendar. The student reviews the plan card and approves it.",
+                "blocks": [{"title": p.event.title, "start": p.event.start.isoformat(), "end": p.event.end.isoformat()}
+                           for p in proposals],
+            })
+
+    return [
+        beta_async_tool(find, name=FREE_SLOTS_TOOL["name"], description=FREE_SLOTS_TOOL["description"],
+                        input_schema=FREE_SLOTS_TOOL["input_schema"]),
+        beta_async_tool(plan, name=PLAN_TOOL["name"], description=PLAN_TOOL["description"],
+                        input_schema=PLAN_TOOL["input_schema"]),
+    ]
 
 
 def _propose_tool(
@@ -226,7 +354,8 @@ def _propose_tool(
 
 
 def _list_tool(calendar: GoogleCalendar, user_id: UUID, timezone: str,
-               emit: Callable[[dict[str, Any]], None] | None = None) -> Any:
+               emit: Callable[[dict[str, Any]], None] | None = None, links: set[str] | None = None) -> Any:
+    """Reads the student's calendar. Event links it returns go into `links`, so reply cards may use them."""
     async def read(**arguments: Any) -> str:
         if emit:
             emit({"type": "activity", "text": activity_for(LIST_EVENTS_TOOL["name"])})
@@ -237,6 +366,8 @@ def _list_tool(calendar: GoogleCalendar, user_id: UUID, timezone: str,
             raise ToolError("Use a timezone-aware start and end up to 31 days apart, or omit both for the next seven days.") from None
         except AppError as exc:
             raise ToolError(exc.message) from None
+        if links is not None:
+            links.update(event["url"] for event in data.get("events") or [] if isinstance(event.get("url"), str))
         return json.dumps(data)
 
     return beta_async_tool(read, name=LIST_EVENTS_TOOL["name"], description=LIST_EVENTS_TOOL["description"],

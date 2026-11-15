@@ -5,7 +5,15 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   server: {
+    headers: { 'Referrer-Policy': 'no-referrer' },
+    allowedHosts: ['antelope-barricade-bluish.ngrok-free.dev'],
     proxy: {
+      '/mcp': { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      '/.well-known': { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      '/authorize': { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      '/token': { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      '/register': { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      '/revoke': { target: 'http://127.0.0.1:8000', changeOrigin: false },
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: false,

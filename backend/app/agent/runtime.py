@@ -328,6 +328,7 @@ class AgentRuntime:
         include_goal_tools: bool = True,
         on_event: OnEvent | None = None,
         allowed_connectors: Sequence[str] | None = None,
+        extra_links: set[str] | None = None,
     ) -> AgentResult:
         """Run a goal for one student.
 
@@ -403,7 +404,7 @@ class AgentRuntime:
                 "Please try a more specific question."
             )
         # Result cards may only link to pages a tool returned in this run.
-        known_urls = set(links) | {s["url"] for s in recorder.sources if isinstance(s.get("url"), str)}
+        known_urls = set(links) | {s["url"] for s in recorder.sources if isinstance(s.get("url"), str)} | (extra_links or set())
         text = verify_cards(text, known_urls)
         sources = _cited_first(_dedupe(recorder.sources), text)
         cited = cited_links(text, links)

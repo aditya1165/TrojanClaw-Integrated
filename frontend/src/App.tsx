@@ -9,6 +9,7 @@ import HowItWorks from "./screens/HowItWorks";
 import Chat from "./screens/Chat";
 import "./App.css";
 import "./workspace.css";
+import { AssistantConsent } from "./components/AssistantConsent";
 
 // Signed out, "home" is the landing page; signed in, it is the chat.
 type Screen = "home" | "how";
@@ -26,6 +27,7 @@ export default function App() {
   // After signing in, the backend connects sources in the background; show its progress.
   const [settingUp, setSettingUp] = useState(false);
   const { theme, toggleTheme, setTheme } = useTheme();
+  const [assistantRequest] = useState(() => new URLSearchParams(window.location.search).get("mcp_request"));
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -86,11 +88,17 @@ export default function App() {
 
   return (
     <>
+      {assistantRequest && !account && !checkingSession && <div className="flex items-center justify-between gap-4 border-b border-line bg-subtle px-6 py-3 text-sm text-fg">
+        <span>Sign in to review your assistant's request to connect to TrojanClaw.</span>
+        <button type="button" className="underline" onClick={openAuth}>Sign in</button>
+      </div>}
       {notice && <div role="status" className="flex items-center justify-between gap-4 border-b border-line bg-subtle px-6 py-3 text-sm text-fg">
         <span>{notice}</span>
         <button type="button" className="underline" onClick={() => setNotice("")}>Dismiss</button>
       </div>}
-      {screen === "how" ? (
+      {account && assistantRequest ? (
+        <AssistantConsent key={account.id} request={assistantRequest} account={account} />
+      ) : screen === "how" ? (
         <HowItWorks theme={theme} onToggleTheme={toggleTheme} signedIn={Boolean(account)}
           onBack={() => setScreen("home")}
           onStart={() => { setScreen("home"); if (!account) openAuth(); }} />
