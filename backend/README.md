@@ -257,6 +257,16 @@ otherwise the reply just names the sources it checked.
 - `GET /uploads/{id}`: downloads one of the signed-in account's own files (always as a download, `nosniff`).
 - `POST /chat` takes `attachments: [upload ids]` (up to 5). Each must belong to the signed-in account. PDFs and images are sent to Claude as document and image blocks; text as a text document; Word, PowerPoint and Excel as extracted text (`python-docx`, `python-pptx`, `openpyxl`). The IDs are saved with the message. The next message (one follow-up) includes those files again, up to 18 MB in total (a Claude request is limited to 32 MB); after that they are replaced by a note asking the student to attach them again, because every file is paid for again on each message and tool round.
 
+### Study planning
+
+"Plan my week" runs in the chat agent when Google Calendar is connected (`app/services/study_plan.py`):
+
+- `get_free_slots` reads the student's Google Calendar and returns numbered free slots inside the study hours, with a buffer around existing events (all-day events don't block time). Claude never computes times.
+- `propose_study_plan` takes Claude's picks (slot ID, minutes, title, deadline) in one call, places the blocks and checks every rule: a real slot, the block fits, no overlap, it ends before its deadline, the daily study limit and the block count. If any block fails, nothing is drafted and the reasons go back to Claude.
+- Each block is a normal calendar draft, so approving keeps the free/busy re-check and the duplicate-safe save. The chat shows the blocks as one plan card, grouped by day, with **Add all to Google Calendar**, Discard and per-block Edit/Remove.
+- Settings (study hours, buffer, block lengths, daily limit, how far ahead) are in `config/scheduling.yaml`.
+- Removing events that were already added is not supported (the calendar connection cannot delete events).
+
 ### Token use
 
 Every chat message runs the agent, and each tool round re-sends the whole request, so the backend keeps requests small and cached:

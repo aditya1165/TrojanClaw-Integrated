@@ -233,8 +233,110 @@ const ClockIcon = () => <svg {...icon}><circle cx="12" cy="12" r="9" /><path d="
 const PinIcon = () => <svg {...icon}><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.5" /></svg>;
 const RepeatIcon = () => <svg {...icon}><path d="M17 2l3 3-3 3M3 11V9a4 4 0 0 1 4-4h13M7 22l-3-3 3-3M21 13v2a4 4 0 0 1-4 4H4" /></svg>;
 const BellIcon = () => <svg {...icon}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0" /></svg>;
+const CrossIcon = () => <svg {...icon} className="flex-none"><path d="M6 6l12 12M18 6 6 18" /></svg>;
 const CheckIcon = () => <svg {...icon} className="flex-none"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
 const ArrowIcon = () => <svg {...icon} className="flex-none transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5"><path d="M7 17 17 7M8 7h9v9" /></svg>;
+
+/** Several new study blocks from one reply: one card, grouped by day, approved together. */
+function StudyPlan({ proposals, onChange }: { proposals: CalendarProposal[]; onChange: (proposal: CalendarProposal) => void }) {
+  const [working, setWorking] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [details, setDetails] = useState<string | null>(null);
+  const timezone = proposals[0].event.timezone;
+  const sorted = [...proposals].sort((a, b) => a.event.start.localeCompare(b.event.start));
+  const expired = (proposal: CalendarProposal) => proposal.status === "pending" && new Date(proposal.expires_at).getTime() <= Date.now();
+  const waiting = sorted.filter((proposal) => (proposal.status === "pending" || proposal.status === "approved") && !expired(proposal));
+  const added = sorted.filter((proposal) => proposal.status === "applied");
+  const live = sorted.filter((proposal) => proposal.status !== "cancelled");
+  const minutes = live.reduce((sum, proposal) => sum + (new Date(proposal.event.end).getTime() - new Date(proposal.event.start).getTime()) / 60000, 0);
+  const total = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} hr${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
+  const days = sorted.reduce<[string, CalendarProposal[]][]>((groups, proposal) => {
+    const day = when(proposal.event.start, proposal.event.end, timezone).date;
+    const group = groups.find(([name]) => name === day);
+    if (group) group[1].push(proposal); else groups.push([day, [proposal]]);
+    return groups;
+  }, []);
+
+  const run = async (items: CalendarProposal[], action: "approve" | "cancel") => {
+    for (const proposal of items) {
+      setWorking(proposal.id);
+      try {
+        onChange(await apiRequest<CalendarProposal>(`/calendar/proposals/${proposal.id}/${action}`, { version: proposal.version }));
+        setErrors((current) => { const next = { ...current }; delete next[proposal.id]; return next; });
+      } catch (reason) {
+        // Keep going: one block that now conflicts should not stop the others.
+        setErrors((current) => ({ ...current, [proposal.id]: reason instanceof Error ? reason.message : "Could not update this block." }));
+      }
+    }
+    setWorking(null);
+  };
+  const busy = working !== null;
+  const done = waiting.length === 0 && added.length > 0;
+  const [tone, label]: [Tone, string] = done ? ["done", added.length === live.length ? "Added to Google Calendar" : `${added.length} of ${live.length} added`]
+    : busy ? ["saving", "Adding to Google Calendar"] : live.length === 0 ? ["muted", "Plan discarded"]
+      : added.length ? ["review", `${added.length} of ${live.length} added`] : ["review", "Review study plan"];
+
+  return <article aria-label="Study plan" className={`flex flex-col overflow-hidden rounded-2xl border bg-surface text-sm ${tone === "review" ? "border-accent-fg/40 shadow-sm" : "border-line"}`}>
+    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${TONES[tone]}`}>
+        {tone === "done" ? <CheckIcon /> : tone === "saving" ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-current" /> : <CalendarIcon />}
+        {label}
+      </span>
+      <span className="text-xs text-muted">{live.length} block{live.length === 1 ? "" : "s"} · {total} · {proposals[0].calendar}</span>
+    </header>
+
+    <ol className="flex flex-col">
+      {days.map(([day, items]) => <li key={day} className="border-b border-line last:border-b-0">
+        <p className="bg-subtle/60 px-4 py-1.5 text-xs font-semibold tracking-wide text-muted uppercase">{day}</p>
+        <ul>
+          {items.map((proposal) => {
+            const time = when(proposal.event.start, proposal.event.end, timezone);
+            const removed = proposal.status === "cancelled";
+            const note = proposal.event.description.split("\n")[0].replace("Planned with TrojanClaw.", "").trim();
+            return <li key={proposal.id} className="border-t border-line first:border-t-0">
+              <div className="flex items-start gap-3 px-4 py-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:gap-3">
+                <span className={`flex-none pt-0.5 text-[13px] font-medium whitespace-nowrap tabular-nums sm:w-36 ${removed ? "text-muted line-through" : "text-muted sm:text-fg"}`}>{time.time}</span>
+                <div className="min-w-0 flex-1">
+                  <p className={`leading-snug font-semibold ${removed ? "text-muted line-through" : ""}`}>{proposal.event.title}</p>
+                  {note && !removed && <p className="mt-0.5 truncate text-muted">{note}</p>}
+                  {errors[proposal.id] && <p role="alert" className="mt-1 text-error">{errors[proposal.id]}</p>}
+                  {expired(proposal) && <p className="mt-1 text-muted">Expired. Ask in chat for a new plan.</p>}
+                </div>
+                </div>
+                <span className="mt-0.5 flex-none rounded-md bg-subtle px-1.5 py-0.5 text-xs font-medium text-muted">{time.length}</span>
+                <span className="flex flex-none items-center gap-1">
+                  {working === proposal.id && <span className="h-4 w-4 animate-spin rounded-full border-2 border-line border-t-accent-fg" aria-label="Working" />}
+                  {proposal.status === "applied" && (proposal.event_url
+                    ? <a href={proposal.event_url} target="_blank" rel="noopener noreferrer" title="Open in Google Calendar"
+                      className="group inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-ok hover:bg-ok-soft"><CheckIcon />Open<ArrowIcon /></a>
+                    : <span className="inline-flex h-8 items-center gap-1 px-2 text-xs font-medium text-ok"><CheckIcon />Added</span>)}
+                  {proposal.status === "pending" && !busy && !expired(proposal) && <>
+                    <button type="button" onClick={() => setDetails(details === proposal.id ? null : proposal.id)} aria-expanded={details === proposal.id}
+                      className="h-8 rounded-lg px-2 text-xs font-medium text-muted hover:bg-subtle hover:text-fg">{details === proposal.id ? "Close" : "Edit"}</button>
+                    <button type="button" onClick={() => void run([proposal], "cancel")} aria-label={`Remove ${proposal.event.title}`} title="Remove from plan"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-subtle hover:text-fg"><CrossIcon /></button>
+                  </>}
+                </span>
+              </div>
+              {details === proposal.id && proposal.status === "pending" && <div className="px-4 pb-4">
+                <ProposalCard key={`${proposal.id}:${proposal.version}`} proposal={proposal} onChange={(next) => { onChange(next); if (next.status !== "pending") setDetails(null); }} />
+              </div>}
+            </li>;
+          })}
+        </ul>
+      </li>)}
+    </ol>
+
+    {waiting.length > 0 && <footer className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3">
+      <Button disabled={busy} onClick={() => void run(waiting, "approve")}>
+        {busy ? "Adding…" : waiting.length === live.length ? `Add all ${waiting.length} to Google Calendar` : `Add the other ${waiting.length}`}
+      </Button>
+      <Button variant="ghost" disabled={busy} onClick={() => void run(waiting.filter((proposal) => proposal.status === "pending"), "cancel")}>Discard plan</Button>
+      <p className="w-full text-xs text-muted sm:ml-auto sm:w-auto">Nothing changes until you approve. Each block is checked against your calendar again first.</p>
+    </footer>}
+  </article>;
+}
 
 /** Drafts created by one chat. A new chat with no saved messages has none. */
 export function CalendarProposals({ refreshKey, conversationId }: { refreshKey: string; conversationId: string | null }) {
@@ -243,13 +345,14 @@ export function CalendarProposals({ refreshKey, conversationId }: { refreshKey: 
   const [revision, setRevision] = useState(0);
   const requestSequence = useRef(0);
   const [replyProposalIds, setReplyProposalIds] = useState<Set<string> | null>(null);
-  const [recentResult, setRecentResult] = useState<{ id: string; refreshKey: string } | null>(null);
+  // Drafts approved or cancelled since the last message stay visible with their result.
+  const [recent, setRecent] = useState<{ ids: Set<string>; refreshKey: string } | null>(null);
   useEffect(() => {
     const refresh = () => setRevision((value) => value + 1);
     const started = () => {
       requestSequence.current++;
       setReplyProposalIds(new Set());
-      setRecentResult(null);
+      setRecent(null);
       setError("");
     };
     const drafted = (event: Event) => {
@@ -284,21 +387,26 @@ export function CalendarProposals({ refreshKey, conversationId }: { refreshKey: 
     return () => { active = false; };
   }, [refreshKey, revision, conversationId]);
 
-  const recentId = recentResult?.refreshKey === refreshKey ? recentResult.id : null;
+  const recentIds = recent?.refreshKey === refreshKey ? recent.ids : new Set<string>();
   const replyProposals = proposals.filter((proposal) => replyProposalIds === null || replyProposalIds.has(proposal.id));
   const needsReview = replyProposals.filter((proposal) => proposal.status === "pending" || proposal.status === "approved");
   // Drafts still waiting for review, plus the one just approved or cancelled, so its result
   // (and the Open in Google Calendar button) stays visible even while others still wait.
-  const activeProposals = proposals.filter((proposal) => needsReview.includes(proposal) || proposal.id === recentId);
+  const activeProposals = proposals.filter((proposal) => needsReview.includes(proposal) || recentIds.has(proposal.id));
   const update = (updated: CalendarProposal) => {
     requestSequence.current++;
     setProposals((values) => values.map((value) => value.id === updated.id ? updated : value));
-    if (updated.status === "applied" || updated.status === "cancelled") setRecentResult({ id: updated.id, refreshKey });
+    if (updated.status === "applied" || updated.status === "cancelled") {
+      setRecent((current) => ({ refreshKey, ids: new Set([...(current?.refreshKey === refreshKey ? current.ids : []), updated.id]) }));
+    }
   };
+  // New one-off events from the same reply (a study plan) are shown together.
+  const planItems = activeProposals.filter((proposal) => (proposal.operation ?? "create") === "create" && !proposal.event.recurrence);
   const card = (proposal: CalendarProposal) => <ProposalCard key={`${proposal.id}:${proposal.version}`} proposal={proposal} onChange={update} />;
 
   return <section aria-label="Calendar proposals" className="flex flex-col gap-4">
     {error && <div role="alert" className="text-sm text-error">Calendar proposals: {error} <button type="button" className="underline" onClick={() => setRevision((value) => value + 1)}>Refresh</button></div>}
-    {activeProposals.map(card)}
+    {planItems.length >= 2 && <StudyPlan proposals={planItems} onChange={update} />}
+    {activeProposals.filter((proposal) => !(planItems.length >= 2 && planItems.includes(proposal))).map(card)}
   </section>;
 }
