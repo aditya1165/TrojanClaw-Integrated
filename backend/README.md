@@ -287,10 +287,10 @@ otherwise the reply just names the sources it checked.
 
 Every chat message runs the agent, and each tool round re-sends the whole request, so the backend keeps requests small and cached:
 
-- **Prompt caching**: the tools and the fixed instructions (`prompts/ai_instructions.md`) carry a cache breakpoint, and the growing conversation is cached automatically (top-level `cache_control`), so repeated input is billed at the cache-read rate. The date, connector list and calendar rules sit after the fixed part.
+- **Prompt caching**: the tools and the fixed instructions (`prompts/ai_instructions.md`) carry a cache breakpoint, and the growing conversation is cached automatically (top-level `cache_control`), so repeated input is billed at the cache-read rate. The date and time, connector list and calendar rules change on every request, so they go in a `role: "system"` message after the conversation (supported on Sonnet 5.5, Opus 5.5 and Haiku 5.5); the next message in a chat then re-reads the earlier turns from the cache. Older models get them as a second `system` block instead.
 - At most 5 tool rounds per reply (`max_tool_rounds` in `config/agent.yaml`), the last 20 saved messages as history, connector results capped at 20,000 characters (with a note to ask a narrower question), and files re-sent for one follow-up only.
 - Each model call is logged as `Claude call: input=… cache_read=… cache_write=… output=…`, so cache hits can be checked in the backend terminal.
-- The model is set in `config/agent.yaml` (`claude-opus-5-5`); `claude-sonnet-5-5` or `claude-haiku-5-5` cost less.
+- The model is set in `config/agent.yaml` (`claude-sonnet-5-5`); `claude-opus-5-5` costs twice as much, `claude-haiku-5-5` much less.
 - Deleting a chat deletes its files. Uploads that were never sent stay in the bucket.
 
 The bucket has no storage policies, so browser keys can't reach it; the backend uses `SUPABASE_SECRET_KEY` (Supabase Dashboard → Project Settings → API Keys → Secret keys). Migration: `20261123000000_chat_uploads_bucket.sql`.

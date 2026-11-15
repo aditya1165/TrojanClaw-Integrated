@@ -2,9 +2,10 @@
 # Restart the backend after editing.
 
 # Claude model and settings for every goal unless a goal overrides them.
-# For a much cheaper agent use `claude-haiku-5-5`, and delete `request_options`
+# Sonnet 5.5 costs half of Opus 5.5 (`claude-opus-5-5`, for harder reasoning). For a much
+# cheaper agent use `claude-haiku-5-5`, and delete `request_options`
 # (server-side refusal fallbacks are not available for Haiku).
-model: claude-opus-5-5
+model: claude-sonnet-5-5
 effort: low                    # low | medium | high | xhigh | max
 max_tokens: 16000
 max_tool_rounds: 5             # stop after this many Claude <-> tool round trips (each one re-sends the whole request)

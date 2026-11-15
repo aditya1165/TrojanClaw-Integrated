@@ -212,6 +212,30 @@ def _provider(status: Any) -> str:
     return str(getattr(provider, "value", provider))
 
 
+# Models that accept a {"role": "system"} message inside `messages` (no beta header needed).
+# Others (for example claude-sonnet-5) return a 400 for it, so they keep the context in `system`.
+_MID_CONVERSATION_SYSTEM = (
+    "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-opus-4-8", "claude-fable-5", "claude-mythos-5",
+)
+
+
+def _with_context(
+    instructions: str, messages: list[dict[str, Any]], context: str, model: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Request `system` and `messages`, laid out for prompt caching.
+
+    Tools and the fixed instructions carry an explicit cache breakpoint, and the top-level
+    automatic breakpoint caches the conversation. The context (date and time to the minute,
+    connectors, caller notes) changes on every request, so it goes in a system message after
+    the conversation: then the next message in the chat re-reads the earlier turns from the
+    cache. Inside `system` it would sit before the history and make the history miss.
+    """
+    system = [{"type": "text", "text": instructions, "cache_control": {"type": "ephemeral"}}]
+    if model.startswith(_MID_CONVERSATION_SYSTEM) and messages and messages[-1].get("role") == "user":
+        return system, [*messages, {"role": "system", "content": context}]
+    return system + [{"type": "text", "text": context}], messages
+
+
 def _now_line(timezone: str) -> str:
     now = datetime.now(ZoneInfo(timezone))
     # Windows does not support strftime's %-d / %-I padding modifiers.
@@ -328,18 +352,11 @@ class AgentRuntime:
             if include_goal_tools
             else ([], [])
         )
-        # The instructions are fixed text; the date, sources and caller notes go in a second block.
+        # The instructions are fixed text; the date, sources and caller notes change per request.
         context = _now_line(timezone) + "\n" + _connectors_line(providers)
         if extra_instructions:
             context += "\n\n" + extra_instructions
-        # Prompt caching: tools and the fixed instructions are cached (explicit breakpoint), and
-        # the conversation so far is cached by the top-level automatic breakpoint below, so each
-        # tool round and each later message re-reads them at a tenth of the price. The date,
-        # connectors and caller notes change, so they come after the fixed part.
-        system = [
-            {"type": "text", "text": self._config.system_prompt, "cache_control": {"type": "ephemeral"}},
-            {"type": "text", "text": context},
-        ]
+        system, messages = _with_context(self._config.system_prompt, messages, context, goal_config.model)
         extra: dict[str, Any] = dict(self._config.request_options)
         if goal_config.effort:
             extra["output_config"] = {"effort": goal_config.effort}
