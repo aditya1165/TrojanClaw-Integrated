@@ -5,6 +5,7 @@ reply cites it, so the model cannot invent a source link.
 """
 
 import json
+import re
 
 PROVIDER_NAMES = {"brightspace": "Brightspace", "handshake": "Handshake", "piazza": "Piazza"}
 TITLE_KEYS = ("title", "name", "subject", "jobTitle", "employerName", "courseName")
@@ -61,9 +62,23 @@ def _walk(value, provider: str, found: dict, depth: int = 0) -> None:
             pass
 
 
+# A link inside a JSON string, also when that JSON is itself escaped inside another string.
+_LINK = re.compile(r"https://[^\s\"'\\<>]+")
+
+
 def collect_links(result: str, provider: str, found: dict) -> None:
-    """Add links from a connector tool result (JSON content blocks) to `found`."""
-    _walk(result, provider, found)
+    """Add links from a connector tool result (JSON content blocks) to `found`.
+
+    Long results are cut to a size limit (integrations/local.py), which leaves invalid JSON.
+    Then the links are taken from the text itself, so the items before the cut keep theirs.
+    """
+    try:
+        parsed = json.loads(result)
+    except ValueError:
+        for url in _LINK.findall(result)[:200]:
+            found.setdefault(url, {"title": provider_name(provider), "url": url, "provider": provider})
+        return
+    _walk(parsed, provider, found)
 
 
 def cited_links(answer: str, found: dict) -> list[dict]:

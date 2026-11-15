@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import ReactMarkdown from "react-markdown";
+import { isValidElement, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   deleteConversation, getConversationMessages, listConversations, MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, pinConversation,
@@ -11,6 +11,8 @@ import { fromSaved, useChatStream, type ChatItem } from "../lib/chatStream";
 import { effectiveTimezone, readSettings, saveSettings, SIDEBAR, useSettings } from "../lib/settings";
 import { activeSources, INFO, LIVE, useSources, type Sources } from "../lib/sources";
 import { toast } from "../lib/toast";
+import { CardBlock } from "../components/AnswerCards";
+import { cardLinks } from "../lib/cards";
 import { CalendarProposals } from "../components/Calendar";
 import ChatList from "../components/ChatList";
 import SettingsDialog from "../components/SettingsDialog";
@@ -398,12 +400,8 @@ function ChatThread({ conversationId, initialMessages, sources, selectedConnecto
                 <div className="rounded-2xl bg-subtle px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</div>
               </div>
             ) : message.content ? (
-              <article key={message.id} className="flex flex-col gap-3">
-                <div className="markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-                </div>
-                {message.sources.length > 0 && <SourceChips sources={message.sources} />}
-              </article>
+              <Answer key={message.id} content={message.content} sources={message.sources}
+                final={!(isLoading && message === last)} />
             ) : null,
           )}
 
@@ -499,6 +497,47 @@ interface PendingFile { key: string; name: string; size: number; state: "uploadi
 
 function formatSize(bytes: number) {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** An assistant reply: markdown with result cards, then where it came from. */
+function Answer({ content, sources, final }: { content: string; sources: Source[]; final: boolean }) {
+  // Cards already link to their pages; list only the other sources underneath.
+  const carded = cardLinks(content);
+  const rest = sources.filter((source) => !source.url || !carded.has(source.url));
+  return (
+    <article className="flex flex-col gap-3">
+      <div className="markdown-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(final)}>{content}</ReactMarkdown>
+      </div>
+      {final && rest.length > 0 && <SourceChips sources={rest} />}
+    </article>
+  );
+}
+
+const isCards = (className?: string) => !!className && /\blanguage-cards\b/.test(className);
+
+/** ```cards blocks become result cards; links open in a new tab. */
+function markdownComponents(final: boolean): Components {
+  return {
+    pre: ({ children }) => {
+      const child = children as ReactNode;
+      if (isValidElement<{ className?: string }>(child) && isCards(child.props.className)) return <>{child}</>;
+      return <pre>{children}</pre>;
+    },
+    code: ({ className, children }) =>
+      isCards(className)
+        ? <CardBlock raw={String(children ?? "")} final={final} />
+        : <code className={className}>{children}</code>,
+    a: ({ href, title, children }) => {
+      const external = !!href && /^https?:\/\//.test(href);
+      return (
+        <a href={href} title={title} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+          {children}
+          {external && <span className="ml-0.5 inline-block align-[-1px] opacity-70"><ExternalIcon /></span>}
+        </a>
+      );
+    },
+  };
 }
 
 /** Where the reply came from: links it relied on, or the connectors it checked. */

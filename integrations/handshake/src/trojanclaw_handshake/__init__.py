@@ -15,6 +15,7 @@ import handshake_mcp.client as handshake_client
 from handshake_mcp.auth import run_logout
 from handshake_mcp.tools import register_all
 from .events import EVENT_TOOLS, register as register_event_catalog
+from .links import linked
 
 run_login = login_handshake
 
@@ -47,7 +48,7 @@ class _ReadOnlyRegistrar:
                     "destructiveHint": False,
                     "idempotentHint": True,
                     "openWorldHint": True,
-                })(function)
+                })(linked(function))  # jobs and employers get Handshake page links
                 self.registered.add(function.__name__)
             return function
         return register

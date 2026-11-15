@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
+import re
 import time
 from typing import Any, Callable, Protocol
 from uuid import UUID
@@ -34,6 +35,7 @@ from mcp.server.mcpserver import MCPServer
 
 from app.agent.config import AgentConfig
 from app.errors import AppError, DependencyUnavailableError
+from app.services.answer_cards import verify_cards
 from app.services.sources import activity_for, cited_links, collect_links
 
 _DEFAULT_TIMEZONE = "America/Los_Angeles"
@@ -124,6 +126,27 @@ def _dedupe(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
             seen.add(key)
             unique.append(source)
     return unique
+
+
+_MAX_UNCITED_SOURCES = 5
+
+
+def _mentions(text: str, url: str) -> bool:
+    """The whole link appears in the text (so ...id=1 does not match ...id=13)."""
+    return re.search(re.escape(url) + r"(?![\w/?=&%~+-]|\.\w)", text) is not None
+
+
+def _cited_first(sources: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Sources the reply links to; if it links to none, the first few the tools returned.
+
+    A search tool returns many items (an events search lists 20-30); showing them all under
+    a reply that mentions three is noise. Connector entries (no specific page) are kept.
+    """
+    linked = [s for s in sources if s.get("kind") != "connector" and s.get("url") and _mentions(text, s["url"])]
+    others = [s for s in sources if s.get("kind") == "connector"]
+    if linked:
+        return linked + others
+    return [s for s in sources if s.get("kind") != "connector"][:_MAX_UNCITED_SOURCES] + others
 
 
 def _connector_tools(
@@ -362,7 +385,10 @@ class AgentRuntime:
                 "I couldn't finish answering within the allowed number of steps. "
                 "Please try a more specific question."
             )
-        sources = _dedupe(recorder.sources)
+        # Result cards may only link to pages a tool returned in this run.
+        known_urls = set(links) | {s["url"] for s in recorder.sources if isinstance(s.get("url"), str)}
+        text = verify_cards(text, known_urls)
+        sources = _cited_first(_dedupe(recorder.sources), text)
         cited = cited_links(text, links)
         if cited:
             # Specific links the reply cites replace the connector's home page.
