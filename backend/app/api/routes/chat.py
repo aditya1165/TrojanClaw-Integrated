@@ -15,12 +15,11 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.api.routes.auth import get_current_user, require_trusted_origin
-from app.api.routes.integrations import require_local_request
 from app.dependencies import get_chat_service, get_conversation_repository
 from app.errors import AppError
 from app.models.auth import AccountProfile
@@ -79,15 +78,6 @@ async def _attachment_blocks(store: UploadStore, user_id: UUID, new: list[UUID],
     return new_blocks, uploads, history_blocks
 
 
-def _is_local(http_request: Request) -> bool:
-    """The signed-in account's saved connector sessions are used automatically only for requests from this computer."""
-    try:
-        require_local_request(http_request)
-    except AppError:
-        return False
-    return True
-
-
 async def name_conversation(conversations: ConversationRepository, service: ChatService,
                             user_id: UUID, conversation_id: UUID, question: str, answer: str) -> None:
     try:
@@ -100,16 +90,14 @@ async def name_conversation(conversations: ConversationRepository, service: Chat
 @router.post("/chat", dependencies=[Depends(require_trusted_origin)])
 async def chat(
     turn: ChatTurn,
-    http_request: Request,
     service: ChatService = Depends(get_chat_service),
     conversations: ConversationRepository = Depends(get_conversation_repository),
     store: UploadStore = Depends(get_upload_store),
     user: AccountProfile = Depends(get_current_user),
 ) -> StreamingResponse:
-    if turn.connectors:
-        # Connector helpers run on this computer (see CONNECTORS.md).
-        require_local_request(http_request)
-    use_saved_connectors = _is_local(http_request)
+    # Authentication identifies the owner; the selected sources limit reads.
+    # A tunnel or hosted frontend does not change whose saved sessions are used.
+    use_saved_connectors = True
 
     history = await asyncio.to_thread(conversations.messages, user.id, turn.conversation_id, HISTORY_LIMIT) \
         if turn.conversation_id else []
