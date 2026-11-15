@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from app.config import get_settings
 from app.database import get_database
+from app.repositories.conversations import ConversationRepository
 from app.repositories.documents import DocumentRepository
 from app.services.chat import ChatService
 from app.services.embeddings import EmbeddingService
@@ -23,3 +24,13 @@ def get_chat_service() -> ChatService:
         campus_events=get_engagesc_service(),
         calendar=get_calendar_service(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_conversation_repository() -> ConversationRepository:
+    return ConversationRepository(get_database())
+
+
+@lru_cache(maxsize=1)
+def get_language_model() -> LanguageModelService:
+    return LanguageModelService(get_settings())

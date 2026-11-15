@@ -80,7 +80,7 @@ def status(request: Request, response: Response, payload: UscLoginPoll,
         detail = "Signed in and connected Brightspace. Calendar: " + exc.message
     except (ConfigurationError, psycopg2.Error):
         logger.warning("Google sign-in finished; Calendar MCP connection needs setup")
-        detail = "Signed in and connected Brightspace. Google Calendar could not connect yet. Check that Google Calendar API is enabled, then use Connect in its card."
+        detail = "Signed in and connected Brightspace. Google Calendar could not connect yet. Check that Google Calendar API is enabled, then connect it from Sources."
     return UscLoginStatus(status="done", account=profile, detail=detail)
 
 

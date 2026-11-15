@@ -122,7 +122,7 @@ class GoogleCalendar:
         if not saved:
             raise AppError("The calendar connection expired. Start connecting again.", "calendar_state_invalid", 400)
         if error or not code:
-            raise AppError("Google Calendar was not connected. You can try again from Manage sources.", "calendar_consent_denied", 400)
+            raise AppError("Google Calendar was not connected. You can try again from Sources.", "calendar_consent_denied", 400)
         tokens = self.exchange(code, saved["verifier"])
         self.complete_connection(user_id, tokens)
 
@@ -155,7 +155,7 @@ class GoogleCalendar:
     def connection(self, user_id):
         row = self.repository.connection(user_id)
         if not row:
-            raise AppError("Connect Google Calendar from Manage sources first.", "calendar_not_connected", 409)
+            raise AppError("Connect Google Calendar from Sources first.", "calendar_not_connected", 409)
         return row
 
     def request(self, connection, method, path, **kwargs):
@@ -185,17 +185,17 @@ class GoogleCalendar:
         if event.start <= datetime.now(timezone.utc):
             raise AppError("Choose a start time in the future.", "calendar_past_event", 400)
 
-    def propose(self, user_id, event):
+    def propose(self, user_id, event, conversation_id=None):
         self.future(event)
         connection = self.connection(user_id)
-        row = self.repository.create(user_id, connection["id"], event.model_dump(mode="json"))
+        row = self.repository.create(user_id, connection["id"], event.model_dump(mode="json"), conversation_id)
         return self.view(row, connection)
 
-    def proposals(self, user_id):
+    def proposals(self, user_id, conversation_id=None):
         if not self.configured:
             return []
         connection = self.repository.connection(user_id)
-        return [self.view(row, connection) for row in self.repository.list(user_id)] if connection else []
+        return [self.view(row, connection) for row in self.repository.list(user_id, conversation_id)] if connection else []
 
     def edit(self, user_id, proposal_id, version, event):
         self.future(event)

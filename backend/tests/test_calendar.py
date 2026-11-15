@@ -40,8 +40,8 @@ class MemoryRepository:
     def connection(self, user_id):
         return self.link if user_id == self.owner else None
 
-    def create(self, user_id, connection_id, event):
-        row = dict(id=uuid4(), user_id=user_id, connection_id=connection_id, event=deepcopy(event), version=1,
+    def create(self, user_id, connection_id, event, conversation_id=None):
+        row = dict(id=uuid4(), user_id=user_id, connection_id=connection_id, event=deepcopy(event), version=1, conversation_id=conversation_id,
                    status="pending", expires_at=datetime.now(timezone.utc) + timedelta(days=1), event_url=None, locked=False)
         self.rows[row["id"]] = row
         return deepcopy(row)
@@ -52,8 +52,9 @@ class MemoryRepository:
             raise AppError("Not found", "proposal_not_found", 404)
         return deepcopy(row)
 
-    def list(self, user_id):
-        return [deepcopy(row) for row in self.rows.values() if row["user_id"] == user_id]
+    def list(self, user_id, conversation_id=None):
+        return [deepcopy(row) for row in self.rows.values()
+                if row["user_id"] == user_id and (conversation_id is None or row["conversation_id"] == conversation_id)]
 
     def claim(self, user_id, proposal_id, version):
         row = self.get(user_id, proposal_id)

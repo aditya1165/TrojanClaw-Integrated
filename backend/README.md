@@ -34,7 +34,7 @@ Account authentication is separate from extension linking.
 
 ## EngageSC public events
 
-Sign in and select **Link public events** in the EngageSC sidebar card. This
+Sign in, open **Sources**, and select **Turn on** next to EngageSC. This
 subscribes that account to the public campus event feed; no USC credentials,
 private event access, registration, or calendar writes are involved. View events
 supports a text search and a 7/30/90-day range. Other extensions remain deferred.
@@ -245,7 +245,40 @@ Local-only `POST /integrations/{provider}/connect` opens a persistent Chromium
 sign-in window in a background job; poll the list for the result.
 `POST /integrations/{provider}/verify` checks the saved session through MCP.
 `POST /chat` accepts `connectors: ["brightspace", "handshake"]` to enable
-read-only live tool use. See [CONNECTORS.md](../CONNECTORS.md) for setup.
+read-only live tool use (this computer only). See [CONNECTORS.md](../CONNECTORS.md) for setup.
+
+### Chats
+
+Each account has many saved chats (`public.conversations` and
+`public.conversation_messages`). The server keeps the history: `POST /chat`
+takes `{conversation_id, message, connectors, timezone}`, loads the last 40
+saved messages, and saves the new question and answer together. Leave out
+`conversation_id` to start a new chat; the reply returns its id and a
+first-line title, and an AI-written title replaces it a moment later.
+
+The reply streams as newline-delimited JSON (`application/x-ndjson`):
+`activity` (what is being looked up, such as "Checking Brightspace: upcoming
+due dates"), `text` (part of the reply as it is written), `reset` (drop the
+text so far; the reply is being rewritten after tool calls), then `done` (the
+saved reply with `response`, `sources`, `calendar_proposals`,
+`conversation_id`, `title`) or `error`. A reply keeps running and is saved
+even if the browser stops listening.
+
+`sources` are links shown under a reply. A link is included only if it came
+from a connector tool result or retrieved document and the reply cites it;
+otherwise the reply just names the sources it checked.
+
+- `GET /conversations?q=`: your chats, pinned first, then newest; `q` searches titles and messages
+- `POST /conversations/{id}/pin` with `{pinned}`
+- `GET /conversations/{id}/messages`: one chat's messages
+- `POST /conversations/{id}/rename` with `{title}`
+- `POST /conversations/{id}/delete`: also deletes that chat's calendar drafts
+
+Calendar drafts belong to the chat that created them
+(`calendar_proposals.conversation_id`, migration `20261121000000`);
+`GET /calendar/proposals?conversation_id=` lists one chat's drafts. A chat
+from another account always returns 404. Pins are `conversations.pinned_at`
+(migration `20261122000000`).
 
 FastAPI auto-generates interactive docs:
 

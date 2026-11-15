@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "./lib/api";
-import { CalendarIcon, CloseIcon } from "./components/ui";
+import { CloseIcon } from "./components/ui";
 
 interface CampusEvent {
   external_key: string;
@@ -25,7 +25,7 @@ const dateLabel = (event: CampusEvent) => new Intl.DateTimeFormat("en-US", {
   ...(event.all_day ? {} : { hour: "numeric", minute: "2-digit" }),
 }).format(new Date(event.starts_at)) + (event.all_day ? " · All day" : " PT");
 
-function EventsDialog({ onClose }: { onClose: () => void }) {
+export function EventsDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -93,52 +93,5 @@ function EventsDialog({ onClose }: { onClose: () => void }) {
         </>
       )}
     </dialog>
-  );
-}
-
-export default function EngageSCPanel({ signedIn, onSignIn }: { signedIn: boolean; onSignIn: () => void }) {
-  const [connected, setConnected] = useState(false);
-  const [busy, setBusy] = useState(signedIn);
-  const [error, setError] = useState("");
-  const [showEvents, setShowEvents] = useState(false);
-
-  useEffect(() => {
-    if (!signedIn) return;
-    let active = true;
-    apiRequest<{ connected: boolean }>("/integrations/engagesc")
-      .then((data) => { if (active) setConnected(data.connected); })
-      .catch(() => { if (active) setError("Could not check connection. Try again."); })
-      .finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
-  }, [signedIn]);
-
-  const setLink = async (link: boolean) => {
-    if (!signedIn) { onSignIn(); return; }
-    setBusy(true);
-    setError("");
-    try {
-      const status = await apiRequest<{ connected: boolean }>(`/integrations/engagesc/${link ? "connect" : "disconnect"}`, {});
-      setConnected(status.connected);
-      if (link) setShowEvents(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update EngageSC.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-line bg-surface p-4">
-      <div className="flex items-center gap-2 text-sm font-medium"><CalendarIcon />EngageSC</div>
-      <p className="mt-1 text-xs text-muted">{connected ? "Public events linked" : "Public campus events · No USC login"}</p>
-      <div className="mt-2 flex items-center gap-3">
-        {connected ? <>
-          <button className="events-link-button" onClick={() => setShowEvents(true)}>View events</button>
-          <button className="events-text-button" disabled={busy} onClick={() => setLink(false)}>{busy ? "Unlinking..." : "Unlink"}</button>
-        </> : <button className="events-link-button" disabled={busy} onClick={() => setLink(true)}>{busy ? "Loading..." : "Link public events"}</button>}
-      </div>
-      {error && <p className="auth-error mt-2" role="alert">{error}</p>}
-      {showEvents && <EventsDialog onClose={() => setShowEvents(false)} />}
-    </div>
   );
 }

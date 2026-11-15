@@ -1,5 +1,6 @@
 """Chat use case orchestration."""
 
+from collections.abc import Callable
 from uuid import UUID
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -20,6 +21,7 @@ import re
 import psycopg2
 from app.services.calendar import PROPOSE_TOOL, GoogleCalendar
 from app.models.calendar import CalendarEventDraft
+from app.services.sources import activity_for, cited_sources, collect_links
 from app.services.calendar_intent import validate_latest_times
 
 
@@ -57,21 +59,35 @@ class ChatService:
         self._campus_events = campus_events
         self._calendar = calendar
 
-    def chat(self, request: ChatRequest, *, user_id: UUID) -> ChatResponse:
+    def chat(self, request: ChatRequest, *, user_id: UUID, conversation_id: UUID | None = None,
+             emit: Callable[[dict], None] | None = None) -> ChatResponse:
+        """emit, when given, receives progress as it happens: text as it is written
+        ({"type": "text"}), a restart of that text ({"type": "reset"}) and what is
+        being looked up ({"type": "activity"})."""
         calendar_tools = [PROPOSE_TOOL] if self._calendar and self._calendar.configured else []
         created_proposals = []
         rejected_draft = False
+        links: dict = {}
+        providers_used: list[str] = []
+
+        def say(event: dict) -> None:
+            if emit:
+                emit(event)
+
+        streaming = {"on_text": lambda text: say({"type": "text", "text": text}),
+                     "on_reset": lambda: say({"type": "reset"})} if emit else {}
 
         def respond(prompt, tools=None, connector_call=None):
             all_tools = (tools or []) + calendar_tools
             if not calendar_tools:
                 prompt += "\nGoogle Calendar is not configured. You cannot save or change calendar events; never claim you did."
             if not all_tools and connector_call is None:
-                return self._language_model.respond(request.messages, prompt)
+                return self._language_model.respond(request.messages, prompt, **({"on_text": streaming["on_text"]} if emit else {}))
 
             def call(name, arguments):
                 nonlocal rejected_draft
                 if name == "propose_calendar_event" and calendar_tools:
+                    say({"type": "activity", "text": "Drafting a calendar event"})
                     try:
                         event = CalendarEventDraft.model_validate(arguments)
                     except ValidationError as exc:
@@ -90,7 +106,7 @@ class ChatService:
                                 "calendar_draft_exists", 409,
                             )
                         return "This event already has a review card for this message. Do not create another. Proposal: " + proposal.model_dump_json()
-                    proposal = self._calendar.propose(user_id, event)
+                    proposal = self._calendar.propose(user_id, event, conversation_id)
                     created_proposals.append(proposal)
                     return "Draft only; nothing was added to Google Calendar. Ask the user to review the calendar proposal card and click Approve. Proposal: " + proposal.model_dump_json()
                 if connector_call:
@@ -119,9 +135,10 @@ class ChatService:
                     "Its explicit event name and clock times replace earlier ones. Dot notation such as 3.20pm means 15:20. "
                     "Never call the draft tool for an older event before drafting the current task."
                 )
-            answer = self._language_model.respond_with_tools(request.messages, prompt, all_tools, call)
+            answer = self._language_model.respond_with_tools(request.messages, prompt, all_tools, call, **streaming)
             clarification = None
             if calendar_tools and not created_proposals and (rejected_draft or claims_new_calendar_draft(answer)):
+                say({"type": "reset"})
                 def recover(name, arguments):
                     nonlocal clarification
                     if name == "ask_calendar_details":
@@ -168,13 +185,21 @@ class ChatService:
                 "If a session fails, tell the student to reconnect using the connector card. "
                 "These sources are selected: " + ", ".join(request.connectors)
             )
-            answer = respond(
-                self._with_campus_events(prompt, user_id), tools,
-                lambda name, arguments: connectors.call(user_id, name, arguments, request.connectors),
-            )
-            return ChatResponse(response=answer, calendar_proposals=created_proposals)
+            def connector_call(name, arguments):
+                say({"type": "activity", "text": activity_for(name)})
+                provider = name.partition("__")[0]
+                if provider not in providers_used:
+                    providers_used.append(provider)
+                result = connectors.call(user_id, name, arguments, request.connectors)
+                collect_links(result, provider, links)
+                return result
+
+            answer = respond(self._with_campus_events(prompt, user_id), tools, connector_call)
+            return ChatResponse(response=answer, calendar_proposals=created_proposals,
+                                sources=cited_sources(answer, links, providers_used))
         latest_query = request.messages[-1].content
         retrieval_unavailable = False
+        say({"type": "activity", "text": "Searching USC information"})
         try:
             embedding = self._embeddings.embed(latest_query)
         except (OpenAIError, DependencyUnavailableError) as exc:
@@ -183,6 +208,10 @@ class ChatService:
             retrieval_unavailable = True
         else:
             documents = self._documents.search(embedding=embedding, user_id=user_id)
+            for document in documents:
+                if document.source_url and document.source_url.startswith("https://"):
+                    links.setdefault(document.source_url, {"label": (document.page_title or "USC")[:120],
+                                                           "url": document.source_url, "provider": "usc"})
         prompt = build_system_prompt(documents)
         if retrieval_unavailable:
             prompt += (
@@ -191,7 +220,8 @@ class ChatService:
                 "is unavailable and ask the user to provide the relevant information. Do not invent source facts."
             )
         answer = respond(self._with_campus_events(prompt, user_id))
-        return ChatResponse(response=answer, calendar_proposals=created_proposals)
+        return ChatResponse(response=answer, calendar_proposals=created_proposals,
+                            sources=cited_sources(answer, links, []))
 
     def _with_campus_events(self, prompt: str, user_id: UUID) -> str:
         if self._campus_events:

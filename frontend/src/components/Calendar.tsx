@@ -1,54 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { apiRequest } from "../lib/api";
-import type { CalendarEventDraft, CalendarProposal, CalendarStatus } from "../lib/api";
+import type { CalendarEventDraft, CalendarProposal } from "../lib/api";
 import { Button, CalendarIcon } from "./ui";
-
-export function CalendarConnection() {
-  const [status, setStatus] = useState<CalendarStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(() => new URLSearchParams(window.location.search).get("calendar_error") || "");
-  const load = useCallback(() => apiRequest<CalendarStatus>("/calendar/status").then(setStatus), []);
-
-  useEffect(() => {
-    let active = true;
-    apiRequest<CalendarStatus>("/calendar/status")
-      .then((value) => { if (active) setStatus(value); })
-      .catch((reason: Error) => { if (active) setError(reason.message); });
-    return () => { active = false; };
-  }, []);
-
-  const act = async (action: "connect" | "disconnect") => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (action === "connect") {
-        const { url } = await apiRequest<{ url: string }>("/calendar/connect", {});
-        window.location.assign(url);
-      } else {
-        await apiRequest<void>("/calendar/disconnect", {});
-        await load();
-        window.dispatchEvent(new Event("calendar-updated"));
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not update calendar connection.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return <section aria-label="Google Calendar" className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 text-sm">
-    <div className="flex items-center gap-2 font-medium"><CalendarIcon />Google Calendar</div>
-    <p className="break-words text-xs text-muted">{status?.connected ? `Connected: ${status.calendar}` : status?.configured ? "Connect to add events from chat." : status ? "Calendar connection needs setup." : "Checking connection…"}</p>
-    <p className="text-xs text-muted">Every calendar addition needs your approval.</p>
-    {error && <p role="alert" className="text-xs text-error">{error}</p>}
-    <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" disabled={!status?.configured || busy} onClick={() => act("connect")}>{busy ? "Working…" : status?.connected ? "Reconnect" : "Connect"}</Button>
-      {status?.connected && <Button variant="ghost" disabled={busy} onClick={() => act("disconnect")}>Disconnect</Button>}
-    </div>
-    {status?.connected && <p className="text-xs text-muted">Disconnecting removes access and drafts. Events already saved stay in Google Calendar.</p>}
-  </section>;
-}
 
 function formatTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(new Date(value));
@@ -153,7 +106,8 @@ function ProposalCard({ proposal, onChange }: { proposal: CalendarProposal; onCh
   </article>;
 }
 
-export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
+/** Drafts created by one chat. A new chat with no saved messages has none. */
+export function CalendarProposals({ refreshKey, conversationId }: { refreshKey: string; conversationId: string | null }) {
   const [proposals, setProposals] = useState<CalendarProposal[]>([]);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -193,11 +147,12 @@ export function CalendarProposals({ refreshKey }: { refreshKey: string }) {
   useEffect(() => {
     let active = true;
     const sequence = ++requestSequence.current;
-    apiRequest<CalendarProposal[]>("/calendar/proposals")
+    if (!conversationId) return () => { active = false; };
+    apiRequest<CalendarProposal[]>(`/calendar/proposals?conversation_id=${encodeURIComponent(conversationId)}`)
       .then((values) => { if (active && sequence === requestSequence.current) { setProposals(values); setError(""); } })
       .catch((reason: Error) => { if (active && sequence === requestSequence.current) setError(reason.message); });
     return () => { active = false; };
-  }, [refreshKey, revision]);
+  }, [refreshKey, revision, conversationId]);
 
   const recentId = recentResult?.refreshKey === refreshKey ? recentResult.id : null;
   const replyProposals = proposals.filter((proposal) => replyProposalIds === null || replyProposalIds.has(proposal.id));

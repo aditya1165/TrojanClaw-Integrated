@@ -64,12 +64,14 @@ The backend must run on the student's computer, because the popup opens there.
 
 ## Connect and ask
 
-1. Click **Connect** on Brightspace or Handshake.
+1. In the chat, open **Sources** (sidebar, or **Manage connections** in the chat box's Sources menu) and click **Connect** on Brightspace or Handshake.
 2. A Chromium window opens with that connector's saved profile. Complete your usual school login and Duo/MFA yourself.
-3. The helper saves the browser session automatically, closes the window, and verifies it through a read-only MCP call. The card changes from **Waiting for sign-in** to **Connected** only after that succeeds.
-4. Ask in the main chat. Newly connected sources are enabled automatically. Use the **Use in chat** checkboxes to choose which sources the model can read.
+3. The helper saves the browser session automatically, closes the window, and verifies it through a read-only MCP call. The card changes from **Signing in…** to **Connected** only after that succeeds.
+4. Ask in the main chat. Newly connected sources are enabled automatically. Use the **Sources** button in the chat box to choose which sources the model can read.
 
 Examples: "What's due this week?", "Show my latest course announcements", "Find software engineering internships on Handshake".
+
+If USC signs you out of a source, a banner at the top of the chat offers **Reconnect**.
 
 After an app restart, cards with stored session data show **Session saved**. Click **Check session** to verify it, or select **Use in chat** to try it directly. If a school expires the session, click **Sign in again**. Persisting a browser profile does not prevent session expiry or future MFA prompts.
 
@@ -105,7 +107,7 @@ Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read 
 - `GET /integrations`: status of the signed-in account's three cards. All `/integrations` routes require a signed-in account.
 - `POST /integrations/{provider}/connect`: starts a login job, returns 202, then the UI polls status.
 - `POST /integrations/{provider}/verify`: checks a saved session.
-- `POST /chat`: accepts optional `connectors: ["brightspace", "handshake"]` and runs a bounded read-only tool loop.
+- `POST /chat`: takes `{conversation_id, message, connectors, timezone}`. Optional `connectors: ["brightspace", "handshake"]` runs a bounded read-only tool loop; each tool call streams an `activity` event such as "Checking Brightspace: upcoming due dates". The full chat API is in [backend/README.md](backend/README.md#chats).
 
 Login, verification, and connector chat requests require a loopback client and an allowed frontend origin. Keep `CORS_ORIGINS` limited to the local frontend. Only one sign-in job per connector can run in a backend process at a time.
 

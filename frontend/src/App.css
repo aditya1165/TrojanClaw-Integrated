@@ -30,9 +30,9 @@
 .events-search { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 18px; }
 .events-search input, .events-search select { padding: 10px; border: 1px solid var(--tc-line); border-radius: 8px; font-size: 13px; min-width: 0; }
 .events-search input { flex: 1; min-width: 180px; }
-.events-search button, .events-link-button { background: var(--tc-accent); color: var(--tc-on-accent); border-radius: 7px; padding: 7px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.events-search button { background: var(--tc-accent); color: var(--tc-on-accent); border-radius: 7px; padding: 7px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
 .events-search button { font-size: 13px; }
-.events-link-button:disabled, .events-text-button:disabled { opacity: 0.6; cursor: wait; }
+.events-text-button:disabled { opacity: 0.6; cursor: wait; }
 .events-text-button { color: var(--tc-accent-fg); font-size: 11px; text-decoration: underline; cursor: pointer; }
 .events-notice { padding: 18px 0; font-size: 13px; color: var(--tc-muted); }
 .event-item { padding: 20px 0; border-bottom: 1px solid var(--tc-line); overflow-wrap: anywhere; }
@@ -46,23 +46,3 @@
 
 .auth-form input, .events-search input, .events-search select { color: var(--tc-fg); background: var(--tc-surface); }
 
-.connectors-panel { width: 100%; }
-.connectors-heading { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin-bottom: 12px; }
-.connectors-heading span, .connector-note { color: var(--tc-muted); font-size: 12px; }
-.connector-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.connector-card { padding: 14px; border: 1px solid var(--tc-line); border-radius: 12px; background: var(--tc-surface); }
-.connector-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
-.connector-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--tc-muted); }
-.connected .connector-dot { background: var(--tc-ok); }
-.connecting .connector-dot, .saved .connector-dot { background: var(--tc-gold); }
-.connector-card p { color: var(--tc-muted); margin: 8px 0 12px; font-size: 12px; }
-.connector-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.connector-actions button { padding: 7px 9px; border: 1px solid var(--tc-line); border-radius: 7px; color: var(--tc-fg); background: var(--tc-subtle); cursor: pointer; font: inherit; font-size: 12px; }
-.connector-actions button:disabled, .connector-toggle:has(input:disabled) { opacity: .5; cursor: default; }
-.connector-toggle { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; }
-.connector-toggle input { accent-color: var(--tc-accent); }
-.connector-card small { display: block; margin-top: 10px; color: var(--tc-muted); overflow-wrap: anywhere; font-size: 12px; }
-.connector-note { line-height: 1.5; margin: 10px 0 0; }
-.connectors-panel .error-text { margin-top: 8px; font-size: 12px; color: var(--tc-error); }
-aside .connector-grid { grid-template-columns: 1fr; }
-@media (max-width: 640px) { .connector-grid { grid-template-columns: 1fr; } }

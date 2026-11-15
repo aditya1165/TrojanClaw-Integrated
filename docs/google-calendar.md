@@ -59,9 +59,9 @@ server, pinned to `@cocal/google-calendar-mcp@2.8.1`.
    tokens are encrypted with this key in PostgreSQL. Replacing the key requires
    users to reconnect. The frontend URL must also be in `CORS_ORIGINS`.
 6. Restart the backend and use **Continue with USC Google** in the sign-in
-   dialog. Existing users can also select **Connect** in the Google Calendar
-   card. Connecting uses a full-page redirect, so finish or copy any unsaved
-   conversation first.
+   dialog. Existing users can open **Sources** in the chat sidebar and select
+   **Connect** next to Google Calendar. Connecting uses a full-page redirect;
+   chats are saved, so nothing is lost.
 
 Google consent grants API access, not approval of individual events. Requested
 scopes are `calendar.calendarlist.readonly`, `calendar.events.readonly`,
@@ -109,9 +109,11 @@ The existing **Sign in with USC** and username/password options remain available
 
 ## Try it
 
-Ask chat: “Add a study session on [a future date] from 4 to 5 PM.” The browser's
-time zone is supplied with the chat request; an explicitly requested zone takes
-precedence. If a date, title, time or duration is missing, chat should ask for it.
+Ask chat: “Add a study session on [a future date] from 4 to 5 PM.” The time zone
+from **Settings** (the browser's, unless changed) is supplied with the chat
+request; an explicitly requested zone takes precedence. Each draft belongs to
+the chat that created it and shows only in that chat; deleting the chat deletes
+its drafts, not events already added to Google Calendar. If a date, title, time or duration is missing, chat should ask for it.
 Verify the actual draft before approving.
 
 - Review the title, start, end, time zone, location, description, and destination.

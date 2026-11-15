@@ -1,40 +1,24 @@
 import type { Theme } from "../theme";
 import { ArrowRightIcon, Button, LockIcon, Logo, ThemeToggle } from "../components/ui";
 
-const STEPS = [
-  {
-    title: "Make it yours",
-    text: "Create an account with your name, username and password.",
-  },
-  {
-    title: "Ask anything",
-    text: "Ask about USC courses, campus and upcoming public events.",
-  },
-  {
-    title: "Explore campus",
-    text: "Link the public EngageSC feed to discover events and organizations.",
-  },
-];
-
 interface LandingProps {
   theme: Theme;
   onToggleTheme: () => void;
-  onContinue: () => void;
-  onOpenChat: () => void;
+  onSignIn: () => void;
   onCreateAccount: () => void;
-  signedIn: boolean;
+  onHowItWorks: () => void;
   checkingSession: boolean;
 }
 
-export default function Landing({ theme, onToggleTheme, onContinue, onOpenChat, onCreateAccount, signedIn, checkingSession }: LandingProps) {
+export default function Landing({ theme, onToggleTheme, onSignIn, onCreateAccount, onHowItWorks, checkingSession }: LandingProps) {
   return (
     <div className="min-h-screen bg-bg text-fg">
       <nav className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-5">
         <Logo />
         <div className="flex items-center gap-1">
-          <a href="#how" className="px-3 py-3 text-sm text-muted hover:text-fg">
+          <button type="button" onClick={onHowItWorks} className="min-h-11 px-3 text-sm text-muted hover:text-fg">
             How it works
-          </a>
+          </button>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
       </nav>
@@ -49,33 +33,27 @@ export default function Landing({ theme, onToggleTheme, onContinue, onOpenChat, 
             Every deadline, planned around your week.
           </h1>
           <p className="max-w-xl text-lg leading-relaxed text-muted">
-            Ask about USC, explore campus events, and connect your academic sources.
-            Add events to Google Calendar after reviewing and approving them.
+            One USC login connects Brightspace and Handshake. Ask about deadlines,
+            jobs and campus events in one chat.
           </p>
           <div className="mt-2 flex flex-wrap justify-center gap-3">
-            <Button onClick={onContinue} disabled={checkingSession} className="min-h-12 px-5 text-[15px]">
-              {checkingSession ? "Checking your session..." : signedIn ? "Manage sources" : "Sign in"}
+            <Button onClick={onSignIn} disabled={checkingSession} className="min-h-12 px-5 text-[15px]">
+              {checkingSession ? "Checking your session..." : "Sign in"}
               <ArrowRightIcon />
             </Button>
-            <Button variant="secondary" disabled={checkingSession} onClick={signedIn ? onOpenChat : onCreateAccount} className="min-h-12 px-5 text-[15px]">
-              {signedIn ? "Open chat" : "Create account"}
+            <Button variant="secondary" disabled={checkingSession} onClick={onCreateAccount} className="min-h-12 px-5 text-[15px]">
+              Create account
             </Button>
           </div>
           <p className="inline-flex items-center gap-1.5 text-[13px] text-muted">
             <LockIcon />
             Academic sources are read-only. Calendar additions always need your approval.
           </p>
+          <button type="button" onClick={onHowItWorks} className="min-h-11 text-sm font-medium text-accent-fg hover:underline">
+            See how it works
+          </button>
         </section>
 
-        <section id="how" className="mx-auto grid max-w-5xl gap-4 px-6 pb-20 sm:grid-cols-3">
-          {STEPS.map((step, index) => (
-            <div key={step.title} className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-6">
-              <span className="text-[13px] font-semibold text-accent-fg">0{index + 1}</span>
-              <h2 className="text-[17px] font-semibold">{step.title}</h2>
-              <p className="text-sm leading-relaxed text-muted">{step.text}</p>
-            </div>
-          ))}
-        </section>
       </main>
     </div>
   );

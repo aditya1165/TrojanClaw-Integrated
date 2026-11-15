@@ -1,6 +1,8 @@
 """Chat API models."""
 
+from datetime import datetime
 from enum import Enum
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.models.calendar import CalendarProposal
@@ -56,6 +58,67 @@ class ChatRequest(BaseModel):
         return self
 
 
+class ChatTurn(BaseModel):
+    """What the browser sends: one new message. Earlier messages come from the saved chat."""
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: UUID | None = None  # None starts a new chat
+    message: str = Field(min_length=1, max_length=20_000)
+    connectors: list[str] = Field(default_factory=list, max_length=2)
+    timezone: str = Field(default="America/Los_Angeles", max_length=100)
+
+    @field_validator("message")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Message content cannot be blank.")
+        return value.strip()
+
+
+class Source(BaseModel):
+    """A link under a reply. url is None when the reply only names the source it checked."""
+    label: str
+    url: str | None = None
+    provider: str
+
+
 class ChatResponse(BaseModel):
     response: str
     calendar_proposals: list[CalendarProposal] = Field(default_factory=list)
+    sources: list[Source] = Field(default_factory=list)
+    conversation_id: UUID | None = None
+    title: str | None = None
+
+
+class ConversationSummary(BaseModel):
+    id: UUID
+    title: str | None
+    updated_at: datetime
+    pinned: bool = False
+
+
+class ConversationMessage(BaseModel):
+    id: UUID
+    role: ChatRole
+    content: str
+    created_at: datetime
+    sources: list[Source] = Field(default_factory=list)
+
+
+class PinConversation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pinned: bool
+
+
+class RenameConversation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Title cannot be blank.")
+        return " ".join(value.split())

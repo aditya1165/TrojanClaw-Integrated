@@ -51,8 +51,9 @@ def disconnect(user: AccountProfile = Depends(get_current_user), service: Google
 
 
 @router.get("/proposals", response_model=list[CalendarProposal])
-def proposals(user: AccountProfile = Depends(get_current_user), service: GoogleCalendar = Depends(get_calendar_service)):
-    return service.proposals(user.id)
+def proposals(conversation_id: UUID | None = None, user: AccountProfile = Depends(get_current_user),
+              service: GoogleCalendar = Depends(get_calendar_service)):
+    return service.proposals(user.id, conversation_id)
 
 
 @router.post("/proposals/{proposal_id}/edit", response_model=CalendarProposal, dependencies=[Depends(require_trusted_origin)])

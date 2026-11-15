@@ -1,14 +1,31 @@
 export type ChatRole = "user" | "assistant";
 
-export interface ChatMessage {
-  role: ChatRole;
-  content: string;
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  updated_at: string;
+  pinned: boolean;
 }
 
-export interface ChatRequest {
-  messages: ChatMessage[];
-  connectors?: string[];
-  timezone?: string;
+/** A link under a reply; url is null when the reply only names the source it checked. */
+export interface Source {
+  label: string;
+  url: string | null;
+  provider: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  created_at: string;
+  sources: Source[];
+}
+
+/** Sent after each reply is saved, so the chat list can update. */
+export interface ChatSaved {
+  conversation_id: string;
+  title: string | null;
 }
 
 export interface CalendarEventDraft {
@@ -39,6 +56,9 @@ export interface CalendarStatus {
 export interface ChatResponse {
   response: string;
   calendar_proposals?: CalendarProposal[];
+  sources?: Source[];
+  conversation_id?: string;
+  title?: string | null;
 }
 
 export const API_BASE_URL =
@@ -114,64 +134,14 @@ export function authRequest<T>(path: string, body?: object): Promise<T> {
   return apiRequest<T>(`/auth/${path}`, body);
 }
 
-export async function sendChatMessage(
-  request: ChatRequest,
-): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/chat`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(request),
-  });
 
-  if (!response.ok) {
-    const fallbackMessage = `Request failed with status ${response.status}`;
-
-    try {
-      const errorBody = (await response.json()) as { detail?: string };
-      throw new Error(errorBody.detail ?? fallbackMessage);
-    } catch {
-      throw new Error(fallbackMessage);
-    }
-  }
-
-  return (await response.json()) as ChatResponse;
-}
-
-export async function chatEndpointFetch(
-  _input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
-  window.dispatchEvent(new Event("calendar-chat-started"));
-  const response = await fetch(`${API_BASE_URL}/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: init?.body,
-    signal: init?.signal,
-    credentials: "include",
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) window.dispatchEvent(new Event("auth-expired"));
-    const data = await response.json().catch(() => null) as { detail?: unknown } | null;
-    const message = typeof data?.detail === "string" ? data.detail : "Could not send your message. Please try again.";
-    return new Response(message, { status: response.status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
-  }
-
-  const data = (await response.json()) as ChatResponse;
-
-  window.dispatchEvent(new CustomEvent<CalendarProposal[]>("calendar-drafted", {
-    detail: data.calendar_proposals ?? [],
-  }));
-
-  return new Response(data.response, {
-    status: response.status,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-    },
-  });
-}
+export const listConversations = (search = "") =>
+  apiRequest<ConversationSummary[]>(`/conversations${search ? `?q=${encodeURIComponent(search)}` : ""}`);
+export const pinConversation = (id: string, pinned: boolean) =>
+  apiRequest<ConversationSummary>(`/conversations/${encodeURIComponent(id)}/pin`, { pinned });
+export const getConversationMessages = (id: string) =>
+  apiRequest<ConversationMessage[]>(`/conversations/${encodeURIComponent(id)}/messages`);
+export const renameConversation = (id: string, title: string) =>
+  apiRequest<ConversationSummary>(`/conversations/${encodeURIComponent(id)}/rename`, { title });
+export const deleteConversation = (id: string) =>
+  apiRequest<void>(`/conversations/${encodeURIComponent(id)}/delete`, {});

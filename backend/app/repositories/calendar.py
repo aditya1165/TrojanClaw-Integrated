@@ -46,12 +46,16 @@ class CalendarRepository:
     def update_tokens(self, connection_id, encrypted_tokens):
         self.query("UPDATE public.google_calendar_connections SET encrypted_tokens = %s WHERE id = %s", (encrypted_tokens, str(connection_id)))
 
-    def create(self, user_id, connection_id, event):
-        return self.query("INSERT INTO public.calendar_proposals (id, user_id, connection_id, event) VALUES (%s, %s, %s, %s::jsonb) RETURNING *",
-                          (str(uuid4()), str(user_id), str(connection_id), json.dumps(event)))
+    def create(self, user_id, connection_id, event, conversation_id=None):
+        return self.query("INSERT INTO public.calendar_proposals (id, user_id, connection_id, event, conversation_id) VALUES (%s, %s, %s, %s::jsonb, %s) RETURNING *",
+                          (str(uuid4()), str(user_id), str(connection_id), json.dumps(event), str(conversation_id) if conversation_id else None))
 
-    def list(self, user_id):
-        return self.query("SELECT * FROM public.calendar_proposals WHERE user_id = %s AND (status = 'approved' OR expires_at > now()) ORDER BY created_at DESC LIMIT 30", (str(user_id),), many=True)
+    def list(self, user_id, conversation_id=None):
+        """Drafts still worth showing; with a chat, only the drafts that chat created."""
+        chat = " AND conversation_id = %s" if conversation_id else ""
+        params = (str(user_id), str(conversation_id)) if conversation_id else (str(user_id),)
+        return self.query("SELECT * FROM public.calendar_proposals WHERE user_id = %s AND (status = 'approved' OR expires_at > now())"
+                          + chat + " ORDER BY created_at DESC LIMIT 30", params, many=True)
 
     def get(self, user_id, proposal_id):
         row = self.query("SELECT * FROM public.calendar_proposals WHERE user_id = %s AND id = %s", (str(user_id), str(proposal_id)))
