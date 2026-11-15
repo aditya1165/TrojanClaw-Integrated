@@ -103,3 +103,28 @@ Example questions for a connected MCP client:
 - "Tell me about the employer for this posting."
 
 Status (2026-11-14): local connector implemented; real USC login and live tool responses still need verification.
+
+
+## Event and career fair catalog
+
+The local `trojanclaw_handshake/events.py` module replaces the upstream event/fair
+read tools with queries against the authenticated school origin's `/stu/graphql`
+student API. The older `/stu/events` suggested feed repeated records across pages
+and is not used as a full event catalog.
+
+- `hs_search_events` and `hs_search_career_fairs` accept keyword, date-window,
+  saved/registered/school filters, `per_page` (1-50), and an opaque `after` cursor.
+- Results contain `results`, `count`, `has_more`, and `next_cursor`. Keep the same
+  filters and pass each cursor unchanged until `has_more` is false.
+- `hs_get_event` and `hs_get_career_fair` use returned IDs and current student-API
+  fields. Employer lists are bounded previews, with completeness metadata.
+- Requests reuse the existing cookie, school-origin and CSRF transport. This
+  feature does not change login or Cloudflare handling and adds no write tools.
+
+The wrapper excludes upstream event/fair implementations before registering the
+four local tools, preventing duplicate names and excluding registration/following.
+A single page is not the complete catalog; access follows the student's account.
+
+```sh
+uv run --locked --project integrations/handshake --group dev python -m pytest integrations/handshake/tests/test_events.py integrations/handshake/tests/test_server.py -q
+```

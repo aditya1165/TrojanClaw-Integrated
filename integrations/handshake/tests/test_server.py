@@ -49,6 +49,7 @@ def test_search_dispatch_preserves_query_and_cursor(monkeypatch):
     "hs_apply", "hs_withdraw_application", "hs_save_job", "hs_unsave_job",
     "hs_upload_document", "hs_delete_document", "hs_update_bio",
     "hs_register_event", "hs_register_career_fair", "hs_follow_employer",
+    "hs_unregister_event", "hs_follow_event", "hs_unregister_career_fair",
     "unknown_tool",
 ])
 def test_write_and_unknown_tools_cannot_be_called(tool):
