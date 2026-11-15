@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { apiRequest, type ConnectorProvider } from "../lib/api";
 import { activeSources, INFO, LIVE, usable, USC, type Sources, type State } from "../lib/sources";
-import { EventsDialog } from "../EngageSCPanel";
+import { EventsDialog } from "./EventsDialog";
 import { Button, CloseIcon, LockIcon } from "./ui";
 import { toast } from "../lib/toast";
 

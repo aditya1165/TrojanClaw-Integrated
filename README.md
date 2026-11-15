@@ -23,7 +23,7 @@ An AI academic copilot for USC students, built on Claude, MCP, FastAPI, React an
 - [CONNECTORS.md](CONNECTORS.md): Sign in with USC, per-account connector sessions, endpoints
 - [backend/README.md](backend/README.md): backend setup, chat API (streaming, chats, sources), EngageSC
 - [docs/brightspace.md](docs/brightspace.md): `brightspace-mcp-server@5.2.3`, sign-in, tool allowlist
-- [handshake.md](handshake.md): Handshake MCP connector and allowlist
+- [handshake.md](docs/handshake.md): Handshake MCP connector and allowlist
 - [docs/piazza.md](docs/piazza.md): `mcp-piazza`, login methods, tool allowlist (Piazza cannot use the USC login)
 - [docs/google-calendar.md](docs/google-calendar.md): Google OAuth setup, event drafts, and mandatory approval
 
@@ -53,24 +53,50 @@ Frontend map:
 | `src/components/Calendar.tsx` | Calendar draft cards for the open chat |
 | `src/index.css` | Colour tokens (USC cardinal and gold, light and dark) |
 
-## Run locally
+## Run locally (macOS or Windows)
+
+Needs: Python 3.11 (backend), [uv](https://docs.astral.sh/uv/) (connector helpers, Python 3.12), Node.js 22.12 or newer, and Google Chrome (Sign in with USC and the connectors open the installed Chrome). Run every block from the repository root.
+
+**1. Backend** (first time)
 
 ```sh
-# Backend
-cd backend && python3.11 -m venv .venv && source .venv/bin/activate
+# macOS
+cd backend
+python3.11 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env   # fill in DATABASE_URL, SUPABASE_URL, SUPABASE_KEY, API keys
-uvicorn app.main:app --reload
+cp .env.example .env          # then fill in the values
+```
 
-# Connectors (once per checkout; needs uv and Node 22+)
+```powershell
+# Windows (PowerShell)
+cd backend
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env   # then fill in the values
+```
+
+**2. Connector helpers and Google Calendar** (first time, same on both)
+
+```sh
 uv sync --locked --project integrations/handshake
 uv sync --locked --project integrations/piazza --python 3.12
 uv run --locked --project integrations/handshake patchright install chromium
 npm ci --prefix integrations/google-calendar
-
-# Frontend
-cd frontend && cp .env.example .env && npm install && npm run dev
 ```
+
+**3. Run** (two terminals)
+
+```sh
+# Terminal 1, in backend/ with the virtual environment active
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 2, in frontend/ (first time: copy .env.example to .env, then npm install)
+npm run dev
+```
+
+**Tests**: `python -m pytest tests -q` in `backend/`; `npm run lint`, `npm run build` and `npm test` in `frontend/`.
 
 If a source never opens a sign-in window, its helper isn't installed: the Sources menu shows "Install the local connectors first". If Google Calendar says "Install the Google Calendar connector dependencies first", run the `npm ci` line above.
 

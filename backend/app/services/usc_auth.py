@@ -149,7 +149,7 @@ def browser_login(position: Position, identify: Identify, ready: Ready) -> None:
     """Run the USC sign-in popup, find the account, then set up that account's connectors."""
     from playwright.sync_api import sync_playwright
 
-    from app.connectors.usc_login import read_whoami, wait_for_brightspace
+    from app.integrations.brightspace_login import read_whoami, wait_for_brightspace
 
     # A popup-sized window with its address bar, so the student can check it is the real USC login page.
     args = [f"--window-size={POPUP_WIDTH},{POPUP_HEIGHT}"]
@@ -162,7 +162,7 @@ def browser_login(position: Position, identify: Identify, ready: Ready) -> None:
             # An in-memory context: the USC login session disappears when the browser closes.
             context = browser.new_context(no_viewport=True)
             page = context.new_page()
-            if wait_for_brightspace(context, page) is None:
+            if not wait_for_brightspace(context, page):
                 raise TimeoutError("The USC login was not finished in time.")
             logger.info("USC login: Brightspace login detected, asking who logged in")
             account = identify(read_whoami(page))

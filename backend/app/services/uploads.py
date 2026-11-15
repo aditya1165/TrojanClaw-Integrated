@@ -8,6 +8,7 @@ Excel files as their extracted text (Claude does not read those formats directly
 
 import base64
 from dataclasses import dataclass
+import logging
 from functools import lru_cache
 import io
 import re
@@ -17,6 +18,7 @@ from uuid import UUID, uuid4
 from app.config import ConfigurationError, get_settings
 from app.errors import AppError
 
+logger = logging.getLogger(__name__)
 BUCKET = "chat-uploads"
 MAX_BYTES = 5 * 1024 * 1024  # per file
 MAX_FILES = 5  # per message
@@ -144,6 +146,17 @@ def content_block(upload: Upload, data: bytes) -> dict[str, Any]:
             "source": {"type": "text", "media_type": "text/plain", "data": text or "[This file has no readable text.]"}}
 
 
+def _storage(call, *args):
+    """Run one Storage request; a Storage or network failure becomes a clear, safe error."""
+    try:
+        return call(*args)
+    except (AppError, ConfigurationError):
+        raise
+    except Exception as exc:
+        logger.warning("Supabase Storage request failed: %s", type(exc).__name__)
+        raise AppError("File storage is unavailable right now. Please try again.", "upload_storage", 502) from exc
+
+
 class UploadStore:
     """The private `chat-uploads` bucket, used only with the backend's secret key."""
 
@@ -169,13 +182,13 @@ class UploadStore:
         if kind in {"docx", "pptx", "xlsx"}:
             _extract(kind, data)  # refuse a broken file now, not when the student sends the message
         upload = Upload(uuid4(), name, mime, len(data), kind)
-        self._bucket().upload(f"{user_id}/{upload.id}/{name}", data, {"content-type": mime, "upsert": "false"})
+        _storage(self._bucket().upload, f"{user_id}/{upload.id}/{name}", data, {"content-type": mime, "upsert": "false"})
         return upload
 
     def find(self, user_id: UUID, upload_id: UUID) -> tuple[Upload, str]:
         """The account's own upload with this ID (the folder is the account's, so others' files are never found)."""
         folder = f"{user_id}/{UUID(str(upload_id))}"
-        entries = [entry for entry in self._bucket().list(folder) if entry.get("name") and entry.get("id")]
+        entries = [entry for entry in _storage(self._bucket().list, folder) if entry.get("name") and entry.get("id")]
         if not entries:
             raise AppError("This file was not found. Attach it again.", "upload_not_found", 404)
         entry = entries[0]
@@ -185,7 +198,7 @@ class UploadStore:
 
     def read(self, user_id: UUID, upload_id: UUID) -> tuple[Upload, bytes]:
         upload, path = self.find(user_id, upload_id)
-        return upload, self._bucket().download(path)
+        return upload, _storage(self._bucket().download, path)
 
     def delete(self, user_id: UUID, upload_ids: list[UUID]) -> None:
         paths = []
@@ -195,7 +208,7 @@ class UploadStore:
             except AppError:
                 continue
         if paths:
-            self._bucket().remove(paths)
+            _storage(self._bucket().remove, paths)
 
 
 @lru_cache(maxsize=1)

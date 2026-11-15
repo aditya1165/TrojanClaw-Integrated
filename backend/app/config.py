@@ -133,11 +133,3 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings.from_environment()
-
-
-def get_supabase_credentials() -> tuple[str, str]:
-    """Compatibility helper for the Supabase SDK client."""
-    settings = get_settings()
-    if not settings.supabase_url or not settings.supabase_key:
-        raise ConfigurationError("SUPABASE_URL and SUPABASE_KEY are required.")
-    return settings.supabase_url, settings.supabase_key

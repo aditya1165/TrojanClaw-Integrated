@@ -16,7 +16,11 @@ class CalendarMCP:
     def run(self, access_token, action, **payload):
         root = BACKEND_DIR.parent
         project = root / "integrations" / "google-calendar"
-        candidates = sorted((root / ".runtime").glob("node-*-win-x64/node.exe"))
+        portable = root / ".runtime"  # optional portable Node (Windows); otherwise Node from PATH
+        try:
+            candidates = sorted(portable.glob("node-*-win-x64/node.exe")) if portable.is_dir() else []
+        except OSError:
+            candidates = []
         node = str(candidates[-1]) if candidates else shutil.which("node")
         if not node or not (project / "node_modules" / "@cocal" / "google-calendar-mcp").is_dir():
             raise AppError("Install the Google Calendar connector dependencies first.", "calendar_mcp_not_installed", 503)

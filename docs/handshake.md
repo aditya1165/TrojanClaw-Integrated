@@ -86,7 +86,7 @@ Logout removes Handshake's saved profile and cookie snapshot. It does not affect
 
 ## TrojanClaw backend status
 
-Sign in with USC connects Handshake automatically. To connect it again, open **Sources** in the chat sidebar, click **Connect**, sign in in Chromium, and wait for **Connected**. Connected sources are turned on for chat automatically (see **Settings → Default sources**); the **Sources** button in the chat box turns each one on or off. Chat calls the allowed tools live and sends their results to the configured Anthropic model to answer your question. This does not synchronize account data into the database. See [CONNECTORS.md](CONNECTORS.md) for the complete local workflow.
+Sign in with USC connects Handshake automatically. To connect it again, open **Sources** in the chat sidebar, click **Connect**, sign in in Chromium, and wait for **Connected**. Connected sources are turned on for chat automatically (see **Settings → Default sources**); the **Sources** button in the chat box turns each one on or off. Chat calls the allowed tools live and sends their results to the configured Anthropic model to answer your question. This does not synchronize account data into the database. See [CONNECTORS.md](../CONNECTORS.md) for the complete local workflow.
 
 ## Verification
 

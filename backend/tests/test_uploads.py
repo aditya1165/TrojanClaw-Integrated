@@ -176,3 +176,12 @@ def test_uploads_without_the_secret_key_say_what_to_set():
     with pytest.raises(Exception) as error:
         UploadStore("https://example.supabase.co", None).save(USER, "notes.pdf", PDF)
     assert "SUPABASE_SECRET_KEY" in str(error.value)
+
+
+def test_a_storage_outage_gives_a_clear_error(store, monkeypatch):
+    def down(*args):
+        raise ConnectionError("network unreachable")
+    monkeypatch.setattr(store.bucket, "upload", down)
+    with pytest.raises(AppError) as error:
+        store.save(USER, "notes.pdf", PDF)
+    assert error.value.status_code == 502 and "unavailable" in error.value.message

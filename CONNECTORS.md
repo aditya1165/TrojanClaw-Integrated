@@ -146,7 +146,7 @@ The backend passes the helper only that account's folders (`TROJANCLAW_SESSION_D
 
 There is no shared cookie file and no manual cookie import. Brightspace receives only its own two session cookies through the child process environment (`D2L_SESSION_COOKIE`); Handshake reads only its own session directory. Cookies and browser profiles never pass through the frontend or HTTP API. Tool results are sent to Anthropic to answer selected-source questions; they are not written to the campus knowledge database.
 
-Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read tools cover courses, assignments, deadlines, grades, announcements, course content, discussions, groups, rubrics, feedback, and transcripts. Downloads, session-management tools, and class lists are blocked. Handshake's allowlist is documented in [handshake.md](handshake.md). Tool names and parameters are checked again before dispatch; selecting one connector does not grant access to another.
+Brightspace uses USC's `https://brightspace.usc.edu` endpoint. Its allowed read tools cover courses, assignments, deadlines, grades, announcements, course content, discussions, groups, rubrics, feedback, and transcripts. Downloads, session-management tools, and class lists are blocked. Handshake's allowlist is documented in [handshake.md](docs/handshake.md). Tool names and parameters are checked again before dispatch; selecting one connector does not grant access to another.
 
 ## Endpoints and verification
 
@@ -166,15 +166,5 @@ uv run --no-project --python 3.11 --with-requirements requirements-dev.txt pytho
 ```
 
 Automated tests use fake account responses and browser contexts. A real USC/Handshake sign-in still needs the student present to verify institutional login compatibility.
-
-Developer tools for testing the USC login outside the app (run from `backend/`):
-
-```sh
-python -m app.connectors.usc_login   # one USC login on Brightspace in a Chrome window; prints who logged in
-uv run --no-project --with "mcp>=1.10,<2" --with keyring python app/connectors/check.py   # calls the Brightspace MCP server once
-python -m app.connectors.ip_check    # does the saved Brightspace session work from this network?
-```
-
-`ip_check` answers a hosting question: a server can only use students' sessions if USC does not tie a session to the network it was created on. Save a session on your usual network, then run `ip_check` again from another network (for example a phone hotspot).
 
 Sign-in progress is logged in the backend terminal as `USC login: ...` and `USC setup: ...` lines.

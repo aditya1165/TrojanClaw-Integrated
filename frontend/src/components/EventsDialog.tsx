@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { apiRequest } from "./lib/api";
-import { CloseIcon } from "./components/ui";
+import { apiRequest } from "../lib/api";
+import { CloseIcon } from "./ui";
 
 interface CampusEvent {
   external_key: string;
