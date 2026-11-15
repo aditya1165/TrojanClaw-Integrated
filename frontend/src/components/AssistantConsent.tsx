@@ -25,7 +25,7 @@ export function AssistantConsent({ request, account }: { request: string; accoun
   };
   return <main className="min-h-screen bg-bg p-6 text-fg">
     <section className="mx-auto mt-16 flex max-w-lg flex-col gap-5 rounded-2xl border border-line bg-surface p-6">
-      <h1 className="text-2xl font-semibold">Connect your assistant to TrojanClaw</h1>
+      <h1 className="display-title text-[26px]">Connect your assistant to TrojanClaw</h1>
       <p>Signed in as {account.name} · @{account.username}</p>
       <p>{client ? `Request from: ${client}.` : "Checking connection request…"} This name is supplied by the requesting app.</p>
       <p>Allow this assistant to ask TrojanClaw questions using your academic data and your saved Brightspace, Handshake and Piazza connections. Answers and source links will be shared with the assistant.</p>

@@ -115,14 +115,14 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
       <div className="flex flex-col items-center gap-6 text-center">
         <img src="/logo.gif" alt="" className="h-14 w-14 object-contain" />
         <div className="flex flex-col gap-2">
-          <h2 id="auth-title" className="text-2xl font-semibold tracking-[-0.03em]">Welcome to TrojanClaw</h2>
+          <h2 id="auth-title" className="display-title text-[28px]">Welcome to TrojanClaw</h2>
           <p className="text-sm text-muted">Sign in with your USC Google account.</p>
         </div>
 
         {waiting ? (
           <div role="status" className="flex w-full flex-col items-center gap-3 rounded-2xl bg-subtle px-5 py-5">
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-line border-t-accent-fg" aria-hidden="true" />
-            <p className="text-sm font-medium">One more step: your USC login</p>
+            <p className="display-title text-[19px]">One more step: your USC login</p>
             <p className="text-xs leading-relaxed text-muted">
               A small USC window opened (check behind this one). Log in with your NetID and approve Duo; it connects Brightspace, Handshake and WebReg, then closes by itself.
             </p>

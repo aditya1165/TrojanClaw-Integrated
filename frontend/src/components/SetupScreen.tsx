@@ -61,7 +61,7 @@ export default function SetupScreen({ onDone, includeCalendar = false }: SetupSc
       <section role="dialog" aria-modal="true" aria-labelledby="setup-title"
         className="flex w-full max-w-md flex-col gap-6 rounded-2xl border border-line bg-surface p-8 text-fg shadow-xl">
         <div className="flex flex-col gap-2">
-          <h2 id="setup-title" className="text-2xl font-semibold tracking-[-0.02em]">
+          <h2 id="setup-title" className="display-title text-[26px]">
             {finished ? (allConnected ? "You’re all set" : "Almost done") : "Setting things up for you…"}
           </h2>
           <p className="text-sm leading-relaxed text-muted">
