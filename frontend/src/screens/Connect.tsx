@@ -4,6 +4,7 @@ import { Connectors } from "../components/Connectors";
 import EngageSCPanel from "../EngageSCPanel";
 import { Button, LockIcon, Logo, ThemeToggle } from "../components/ui";
 import { CalendarConnection } from "../components/Calendar";
+import { AssistantConnection } from "../components/AssistantConsent";
 
 interface ConnectProps {
   selectedConnectors: ConnectorProvider[];
@@ -40,6 +41,7 @@ export default function Connect({ theme, onToggleTheme, onBack, onContinue, acco
         <EngageSCPanel key={account.id} signedIn onSignIn={onBack} />
         <Connectors selected={selectedConnectors} onChange={onConnectorsChange} />
         <CalendarConnection />
+        <AssistantConnection key={`assistant-${account.id}`} />
 
         <p className="flex items-center gap-2 text-[13px] text-muted">
           <LockIcon />
