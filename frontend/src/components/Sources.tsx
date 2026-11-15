@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ConnectorProvider } from "../lib/api";
+import { apiRequest, type ConnectorProvider } from "../lib/api";
 import { activeSources, INFO, LIVE, usable, USC, type Sources, type State } from "../lib/sources";
 import { EventsDialog } from "../EngageSCPanel";
 import { Button, CloseIcon, LockIcon } from "./ui";
@@ -191,6 +191,7 @@ export function SourcesDialog({ sources, selected, onChange, onClose }: {
               </Button>
             )}
           </div>
+          <WebRegRow />
           <div className="flex flex-wrap items-center gap-3 px-4 py-3">
             <Tile id="engagesc" />
             <div className="flex min-w-[180px] flex-1 flex-col gap-0.5">
@@ -261,5 +262,30 @@ function ConnectorCard({ provider, sources, selected, onChange }: {
         </Button>
       )}
     </article>
+  );
+}
+
+/** WebReg: the course bin is read at each Sign in with USC (read-only). */
+function WebRegRow() {
+  const [info, setInfo] = useState<{ connected: boolean; updated_at: string | null; terms: { term: string; courses: number }[] } | null>(null);
+  useEffect(() => {
+    let active = true;
+    apiRequest<typeof info>("/integrations/webreg").then((value) => { if (active) setInfo(value); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const terms = info?.terms.filter((term) => term.courses > 0) ?? [];
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <span aria-hidden="true" className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#7a1f1f] text-sm font-bold text-white">W</span>
+      <div className="flex min-w-[180px] flex-1 flex-col gap-0.5">
+        <strong className="text-sm font-semibold">WebReg</strong>
+        <span className="text-xs text-muted">
+          {!info ? "Checking…" : info.connected
+            ? `${terms.length ? terms.map((term) => `${term.term}: ${term.courses} course${term.courses === 1 ? "" : "s"}`).join(" · ") : "Course bin is empty"} · updated ${new Date(info.updated_at ?? "").toLocaleString()}`
+            : "Your course bin loads when you Sign in with USC."}
+        </span>
+      </div>
+      <span className="rounded-full bg-subtle px-2.5 py-1 text-xs text-muted">Read-only</span>
+    </div>
   );
 }

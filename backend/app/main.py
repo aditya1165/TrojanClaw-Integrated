@@ -12,7 +12,7 @@ import anthropic
 from google.genai import errors as genai_errors
 import psycopg2
 
-from app.api.routes import auth, chat, conversations, health, integrations, engagesc, calendar, google_auth, uploads
+from app.api.routes import auth, chat, conversations, health, integrations, engagesc, calendar, google_auth, uploads, webreg
 from app.config import ConfigurationError, get_settings
 from app.database import get_database
 from app.errors import AppError
@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
     application.include_router(calendar.router)
     # Register fixed EngageSC paths before /integrations/{provider}/... routes.
     application.include_router(engagesc.router)
+    application.include_router(webreg.router)
     application.include_router(integrations.router)
     return application
 

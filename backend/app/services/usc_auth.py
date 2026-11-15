@@ -115,8 +115,19 @@ def connect_handshake(page, user_id: UUID) -> None:
     logger.info("USC setup: Handshake connected")
 
 
+def connect_webreg(page, user_id: UUID) -> None:
+    """Read the WebReg course bin (read-only) with the same USC login and save it for this account."""
+    from app.integrations.webreg import read_course_bin, save_snapshot
+
+    terms = read_course_bin(page, lambda visible: _show_popup(page, visible), SILENT_SECONDS, SITE_SECONDS)
+    if not terms:
+        raise RuntimeError("WebReg showed no terms.")
+    save_snapshot(user_id, terms)
+    logger.info("USC setup: WebReg course bin saved (%d terms)", len(terms))
+
+
 # Sites connected automatically after Sign in with USC, in order.
-SETUP: dict[str, Callable] = {"handshake": connect_handshake}
+SETUP: dict[str, Callable] = {"handshake": connect_handshake, "webreg": connect_webreg}
 
 
 def verify_brightspace_identity(whoami: dict, expected_email: str) -> None:

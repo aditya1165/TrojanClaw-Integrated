@@ -113,6 +113,8 @@ class ChatService:
             _list_tool(calendar, user_id, request.timezone, emit),
             _update_tool(calendar, user_id, request.timezone, latest, proposals, rejected, lock, conversation_id, emit),
         ] if calendar else []
+        webreg = _webreg_tool(user_id, emit)
+        other_tools = [webreg] if webreg else []
         streaming = {"on_event": emit} if emit else {}
         if allowed_connectors is not None:
             streaming["allowed_connectors"] = allowed_connectors
@@ -124,7 +126,7 @@ class ChatService:
             connectors=request.connectors,
             use_saved_connectors=use_saved_connectors,
             timezone=request.timezone,
-            extra_tools=calendar_tools,
+            extra_tools=calendar_tools + other_tools,
             extra_instructions=CALENDAR_ON if calendar else CALENDAR_OFF,
             **streaming,
         )
@@ -264,6 +266,38 @@ def _update_tool(calendar: GoogleCalendar, user_id: UUID, timezone: str, latest:
 
     return beta_async_tool(update, name=UPDATE_EVENT_TOOL["name"], description=UPDATE_EVENT_TOOL["description"],
                            input_schema=UPDATE_EVENT_TOOL["input_schema"])
+
+
+WEBREG_TOOL = {
+    "name": "list_webreg_courses",
+    "description": "Read the student's USC Web Registration (WebReg) course bin: the courses they have added for each "
+                   "term (for example Spring 2027), each section's details as WebReg shows them (section, type, days, "
+                   "time, instructor, seats and so on), and whether each section is scheduled and/or registered. "
+                   "Read-only snapshot taken at their last Sign in with USC (see updated_at). Use it for questions about "
+                   "their planned or registered classes for upcoming terms. It cannot register, drop or change anything.",
+    "input_schema": {"type": "object", "properties": {"term": {"type": "string", "description": "Optional term name, such as \"Spring 2027\"."}},
+                     "additionalProperties": False},
+}
+
+
+def _webreg_tool(user_id: UUID, emit: Callable[[dict[str, Any]], None] | None = None) -> Any:
+    """The WebReg course bin tool, only for accounts with a saved snapshot."""
+    from app.integrations.webreg import load_snapshot
+
+    if load_snapshot(user_id) is None:
+        return None
+
+    async def read(term: str = "") -> str:
+        if emit:
+            emit({"type": "activity", "text": activity_for(WEBREG_TOOL["name"])})
+        snapshot = await asyncio.to_thread(load_snapshot, user_id) or {}
+        terms = snapshot.get("terms") or []
+        if term:
+            terms = [t for t in terms if term.strip().lower() in str(t.get("term", "")).lower()] or terms
+        return json.dumps({"updated_at": snapshot.get("updated_at"), "terms": terms})
+
+    return beta_async_tool(read, name=WEBREG_TOOL["name"], description=WEBREG_TOOL["description"],
+                           input_schema=WEBREG_TOOL["input_schema"])
 
 
 def _ask_tool(questions: list[str]) -> Any:

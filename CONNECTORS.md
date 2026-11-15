@@ -88,6 +88,14 @@ Examples: "What's due this week?", "Show my latest course announcements", "Find 
 
 After an app restart, cards with stored session data show **Session saved**, and chat keeps using them. Click **Check session** in the Sources window to verify one. If a school expires the session, a connector tool call fails, the source changes to **Sign-in needed**, a banner at the top of the chat offers **Reconnect**, and chat stops using that connector until you sign in again. Persisting a browser profile does not prevent session expiry or future MFA prompts.
 
+## WebReg (read-only course bin)
+
+Sign in with USC also opens USC Web Registration (`webreg.usc.edu`) in the same window, after Handshake, reusing the USC login (no extra Duo expected; if USC asks, the popup comes back). For every term WebReg lists (for example Spring 2027, Fall 2026, Summer 2026) it reads the **course bin**: each course, each section's columns as WebReg labels them, and whether the section is scheduled and/or registered. Nothing is clicked except term links and page loads, so it never registers or drops.
+
+- WebReg has no data API and is behind Cloudflare, so it is read in the real Chrome window, not with plain HTTP requests (`backend/app/integrations/webreg.py`).
+- The result is a snapshot in the account's own folder (`users/<id>/webreg/coursebin.json`), refreshed at every Sign in with USC. No WebReg cookies are kept.
+- Chat gets `list_webreg_courses` when a snapshot exists; the Sources window shows when it was taken (`GET /integrations/webreg`).
+
 ## How chat uses connectors
 
 Chat runs one Claude agent (`backend/app/agent/runtime.py`, configured in `config/agent.yaml` and `prompts/ai_instructions.md`). Each run gets:

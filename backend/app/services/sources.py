@@ -20,6 +20,7 @@ TOOL_ACTIVITY = {
     "propose_calendar_event": "Drafting a calendar event",
     "list_calendar_events": "Checking your Google Calendar",
     "propose_calendar_update": "Drafting a calendar change",
+    "list_webreg_courses": "Checking your WebReg course bin",
     "ask_calendar_details": "Checking the event details",
 }
 
