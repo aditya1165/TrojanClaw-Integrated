@@ -1,81 +1,80 @@
-# Piazza integration
+# Piazza connector
 
-TrojanClaw reads Piazza through **[mcp-piazza](https://github.com/jadenpxrk/mcp-piazza)**, a community MCP server. It is read-only and runs locally over stdio.
-
-## Why this server
-
-- It works for USC SSO users and does not need a Piazza password.
-- It returns structured output, which is easy to store or pass to Claude.
-- It has 12 tools, covering catch-up, search, full threads, and attachments.
-- It runs locally, so the session cookie stays on this machine.
-
-We also compared `piazza-mcp` (smchase, 4 tools, password only) and `RohanMuppa/Piazza-MCP` (password only).
+Piazza is available in Extensions and the Claude chat agent. It uses
+[mcp-piazza](https://github.com/jadenpxrk/mcp-piazza), pinned to 0.1.0, in its own
+Python environment. Piazza requires FastMCP 4; Handshake stays on FastMCP 3.
 
 ## Setup
 
-1. Install uv with `brew install uv`.
-2. Log in once using one of these methods:
-   - `uvx mcp-piazza login --password`. If your account uses SSO only, set a Piazza password first with **Forgot password** on piazza.com. This is the method we use.
-   - `uvx mcp-piazza login --browser chrome`. Quit Chrome first. If macOS asks for "Chrome Safe Storage", click **Allow** once, not "Always Allow", because that key unlocks every Chrome cookie.
-   - `uvx mcp-piazza login --cookie`. Paste the `session_id` cookie value at the prompt. The input is hidden, so nothing appears on screen. Never pass the cookie as a command-line argument.
-3. The session is saved in `~/.config/mcp-piazza/cookies.json`. Use `uvx mcp-piazza logout` to remove it.
+From the project root:
 
-## Running
-
-```bash
-PIAZZA_KEEP_UNREAD=true uvx mcp-piazza serve
+```sh
+uv sync --locked --project integrations/piazza --python 3.12
+uv run --locked --project integrations/piazza patchright install chromium
 ```
 
-Always set `PIAZZA_KEEP_UNREAD=true`. Without it, `get_post` and `get_posts` mark posts as read on Piazza.
+Restart the backend, sign into the app and choose **Connect** on Piazza. Sign into
+the visible Chromium window and reach a class dashboard. The connector verifies
+the account, saves its session and closes the window automatically. Leave it open
+until then; sign-in times out after five minutes. **Check session** reads courses
+through MCP without opening a browser. **Sign in again** reuses the same profile.
 
-## What can be pulled
+Piazza has a separate sign-in. USC bootstrap still connects only Brightspace and
+Handshake. Use whichever login method Piazza offers; never paste credentials into chat.
 
-### Courses
-| Tool | Returns |
+## Tools
+
+| Tools | Access |
 |---|---|
-| `list_courses` | All courses: ID, number, name, term, role, active flag, folders |
-| `get_course_info` | Description, syllabus, office hours, dates, staff (names, roles, emails) |
-| `get_course_stats` | Course statistics page (may be hidden by the instructor) |
+| `list_courses`, `get_course_info`, `get_course_stats` | Enrolled courses, syllabus/staff details, available statistics |
+| `list_posts`, `search_posts` | Summaries, folders, unread filters, keyword search |
+| `get_post`, `get_posts`, `get_post_history` | Full threads, answers, follow-ups, revisions |
+| `recent_activity`, `get_unread_counts`, `list_instructor_notes` | Catch-up, unread counts, instructor announcements |
 
-### Posts
-| Tool | Returns |
-|---|---|
-| `list_posts` | Post summaries. Filters: `all`, `unread`, `following`, `unresolved`, `unanswered`, `mine`, `starred`, and folder |
-| `search_posts` | Keyword search in one course or in all active courses |
-| `get_post` | One full thread: question, student and instructor answers, follow-ups |
-| `get_posts` | Up to 20 full threads in one call |
-| `get_post_history` | Every version of a post, optionally as diffs |
+Tools are named `piazza__<tool>` in the agent. The chat goal in `config/agent.yaml`
+allows Piazza, with the same selection and saved-session behavior as the other
+connectors. The agent includes Piazza source attribution. Attachment downloads,
+arbitrary URL fetching, posting, editing, replying and deleting are excluded.
 
-### Catching up
-| Tool | Returns |
-|---|---|
-| `recent_activity` | Posts with new activity since a time (`24h`, `7d`, `2w`, or an ISO date) |
-| `get_unread_counts` | Count of unread posts per course |
-| `list_instructor_notes` | Instructor announcements and polls |
+Reading threads can increment views and mark posts read. The adapter enables
+upstream `keep_unread=True` and waits for restoration threads before exiting.
+Restoration is best effort; provider errors or process interruption can leave
+a thread read. Course/post content is fenced as untrusted source material.
+Upstream search, pagination and batch limits apply.
 
-### Files
-| Tool | Returns |
-|---|---|
-| `get_attachment` | An image or file from a post, up to 10 MB |
+## Storage and isolation
 
-Courses can be referred to by ID, by course number (`CSCI 566`), or by part of the name.
+```text
+~/.trojanclaw/connectors/users/<app-account-UUID>/piazza/
+  profile/       # Persistent Chromium login state
+  cookies.json   # Only session_id and piazza_session for piazza.com
+```
 
-## Limits
+Both cookies are required: `session_id` alone did not authenticate the live API.
+The existing local connector service supplies the per-account root, honoring
+`TROJANCLAW_SESSION_DIR`. Snapshots use atomic writes and private file permissions
+where supported by the OS. These files are credentials; keep the folder private
+and out of Git. HTTP routes use the authenticated account's ID and do not return
+cookie values. Windows open on the computer running the backend.
 
-- **Read-only.** It cannot post, reply, edit, like, or delete anything.
-- **No grades or assignments.** Piazza does not have them; use Brightspace for those.
-- **Unofficial.** It is built on `piazza-api`, which uses Piazza's internal endpoints and can break without notice.
-- **Early project.** v0.1.0, released October 2026, with a single maintainer. Pin the version once the integration is wired in.
+This follows the current checkout's local storage model; sessions are not stored
+in PostgreSQL or Browserbase. Every request uses a fresh isolated helper. It does
+not scan browser cookies, read upstream's global cookie file, inherit upstream
+credentials or server API keys, or start the upstream login web server. Cookie
+save/load login fallbacks are disabled; only the explicit account snapshot is read.
+Tool calls never open Chromium. Missing or expired sessions require **Connect**.
 
-## Example questions it enables
+The transport permits HTTPS POSTs only to Piazza's fixed `/logic/api` and
+`/main/api` endpoints, with an RPC method allowlist. Redirects and downloads are
+disabled. Request/subprocess timeouts apply, and upstream errors are sanitized.
 
-- "What did I miss this week in CSCI 566?"
-- "Any instructor announcements about the midterm?"
-- "Has anyone already asked about HW3 question 2?"
-- "When are office hours for CS 585, and who is the TA?"
-- "Show me unanswered questions in my classes."
+## Tests
 
-## Status
+```sh
+uv run --locked --project integrations/piazza --group dev python -m pytest integrations/piazza/tests -q
+```
 
-- 2026-11-14: Login verified and `list_courses` returns the owner's courses. The integration is not yet wired into the backend.
-- 2026-11-14: Piazza cannot use the USC login. Piazza's school SSO page (`https://piazza.com/sso`) lists only four schools, and USC is not one of them, so Sign in with USC cannot connect Piazza. It needs its own login (password, browser session, or cookie).
+Tests cover actual MCP discovery, fake-transport course verification, cookie and
+account isolation, visible persistent-browser launch, forbidden tools/destinations,
+and disabled global login fallback. Backend tests cover helper routing and agent
+tool availability. A live enrollment check needs the account holder's Piazza login.

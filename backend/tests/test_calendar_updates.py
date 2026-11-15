@@ -145,24 +145,78 @@ def test_recovered_update_stays_frozen_if_database_confirmation_fails(service):
 
 
 def test_chat_can_propose_existing_event_changes_but_cannot_apply_them(service):
-    from app.models.chat import ChatRequest
-    from app.services.chat import ChatService
-
-    model, documents = MagicMock(), MagicMock()
-    documents.search.return_value = []
+    from tests.test_calendar import FakeRuntime, chat
     service.request.side_effect = [response(**original())]
 
-    def respond(messages, prompt, tools, call):
-        assert "propose_calendar_update" in {tool["name"] for tool in tools}
-        assert "entire series" in prompt
-        call("propose_calendar_update", {"event_id": "existing123", "changes": {"title": "Exam prep"}})
+    async def script(number, kwargs, tools):
+        assert "propose_calendar_update" in tools
+        assert "entire series" in kwargs["extra_instructions"]
+        await tools["propose_calendar_update"].call({"event_id": "existing123", "changes": {"title": "Exam prep"}})
         return "Review the proposed change."
 
-    model.respond_with_tools.side_effect = respond
-    result = ChatService(None, MagicMock(), documents, model, calendar=service).chat(
-        ChatRequest(messages=[{"role": "user", "content": "Rename my study event to Exam prep"}]), user_id=USER,
-    )
+    result = chat(FakeRuntime(script), service, "Rename my study event to Exam prep")
     assert "Approve changes" in result.response
     assert result.calendar_proposals[0].operation == "update"
     assert result.calendar_proposals[0].status == "pending"
+    assert service.request.call_count == 1 and service.request.call_args.args[1] == "GET"
+
+
+def test_recurring_calendar_draft_and_runtime_sources_are_preserved_together(service):
+    from tests.test_calendar import FakeRuntime, chat
+
+    class SourcedRuntime(FakeRuntime):
+        async def run(self, *args, **kwargs):
+            result = await super().run(*args, **kwargs)
+            result.sources = [{"title": "Course announcement", "url": "https://brightspace.usc.edu/test", "kind": "announcement"}]
+            return result
+
+    async def script(number, kwargs, tools):
+        assert kwargs["connectors"] == ["piazza"]
+        await tools["propose_calendar_event"].call(repeating().model_dump(mode="json"))
+        return "Review this series."
+
+    result = chat(SourcedRuntime(script), service, "Remind me to do Splitwise every Monday for a month", connectors=["piazza"])
+    assert result.sources[0].title == "Course announcement"
+    assert result.calendar_proposals[0].event.reminder_minutes == 0
+    assert len(result.calendar_proposals[0].occurrences) == 5
+    assert "Repeats weekly" in result.response
+    service.request.assert_not_called()
+
+
+@pytest.mark.parametrize("update_first", [False, True])
+def test_async_creates_and_updates_share_one_review_card_limit(service, update_first):
+    import asyncio
+    from anthropic.lib.tools import ToolError
+    from tests.test_calendar import FakeRuntime, chat
+
+    service.request.side_effect = [response(**original())]
+
+    async def script(number, kwargs, tools):
+        create = tools["propose_calendar_event"].call(repeating().model_dump(mode="json"))
+        update = tools["propose_calendar_update"].call({"event_id": "existing123", "changes": {"title": "New title"}})
+        results = await asyncio.gather(*( [update, create] if update_first else [create, update]), return_exceptions=True)
+        assert sum(isinstance(result, ToolError) for result in results) == 1
+        return "Review this proposal."
+
+    result = chat(FakeRuntime(script), service)
+    assert len(result.calendar_proposals) == len(service.repository.rows) == 1
+    assert result.calendar_proposals[0].operation == ("update" if update_first else "create")
+    assert all(call.args[1] == "GET" for call in service.request.call_args_list)
+
+
+def test_async_recovery_can_edit_an_existing_event_without_creating_a_replacement(service):
+    from tests.test_calendar import FakeRuntime, chat
+
+    service.request.side_effect = [response(**original())]
+
+    async def script(number, kwargs, tools):
+        if number == 1:
+            return "I've prepared a calendar proposal."
+        assert kwargs["include_goal_tools"] is False
+        await tools["propose_calendar_update"].call({"event_id": "existing123", "changes": {"title": "Exam prep"}})
+        return "Review the changes."
+
+    result = chat(FakeRuntime(script), service, "Rename the existing study event to Exam prep")
+    assert "Approve changes" in result.response
+    assert len(result.calendar_proposals) == 1 and result.calendar_proposals[0].operation == "update"
     assert service.request.call_count == 1 and service.request.call_args.args[1] == "GET"

@@ -120,6 +120,11 @@ def usc_routes(monkeypatch):
             assert user_id == ACCOUNT.id
             return "session-token"
 
+        def current_user(self, token):
+            if token != "session-token":
+                raise HTTPException(401, "Please sign in.")
+            return ACCOUNT
+
     app.dependency_overrides[get_auth_service] = StubService
     yield login
     app.dependency_overrides.pop(get_auth_service, None)
@@ -134,6 +139,10 @@ def test_usc_login_sets_session_once(usc_routes):
         assert response.json()["status"] == "done"
         assert response.json()["account"]["username"] == "ttrojan"
         assert response.cookies.get(COOKIE_NAME) == "session-token"
+        cookie = response.headers['set-cookie'].lower()
+        assert 'httponly' in cookie and 'samesite=lax' in cookie and 'path=/' in cookie
+        assert client.get('/auth/me').status_code == 200
+        assert client.get('/auth/me').json()['id'] == str(ACCOUNT.id)
         # A finished attempt cannot be used again.
         assert client.post("/auth/usc/status", json={"attempt_id": attempt_id}).status_code == 404
 

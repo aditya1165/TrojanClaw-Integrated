@@ -1,32 +1,29 @@
+"""Scrapes the configured USC pages into the campus `documents` table.
+
+Run from backend/: python -m app.scraper.run_all
+"""
+
 import os
-import openai
-from dotenv import load_dotenv
+import sys
 
 # Ensure we can import from app
-import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from app.config import get_settings
 from app.scraper.usc_pages import USC_PAGES
 from app.scraper.chunker import fetch_html, clean_html, chunk_text
 from app.database import connect_database
 from app.scraper.db_schema import validate_documents_schema
+from app.services.embeddings import EmbeddingService
 
-load_dotenv()
-
-def get_openai_embedding(text: str, model="text-embedding-3-small") -> list[float]:
-    """Generates an embedding vector for the text using OpenAI."""
-    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    response = client.embeddings.create(
-        input=text,
-        model=model
-    )
-    return response.data[0].embedding
 
 def run_scraper_pipeline():
     # 1. Validate environment
-    if not os.getenv("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY is not set in environment or .env file.")
-    
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        raise ValueError("GEMINI_API_KEY is not set in backend/.env.")
+    embeddings = EmbeddingService(settings)
+
     print("Connecting to Postgres database...")
     conn = connect_database()
     cur = conn.cursor()
@@ -58,12 +55,15 @@ def run_scraper_pipeline():
         chunks = chunk_text(clean_txt, metadata=page, chunk_size=400, overlap=50)
         print(f"  -> Extracted {len(chunks)} chunks.")
         
-        # 3. Embed & Insert
-        for idx, chunk_data in enumerate(chunks):
+        # 3. Embed (one batched request per page) & Insert
+        try:
+            vectors = embeddings.embed_documents([chunk["chunk_text"] for chunk in chunks])
+        except Exception as e:
+            print(f"  -> Skipped (embedding failed: {type(e).__name__})")
+            continue
+
+        for idx, (chunk_data, embedding) in enumerate(zip(chunks, vectors)):
             try:
-                # Generate embedding
-                embedding = get_openai_embedding(chunk_data["chunk_text"])
-                chunk_data["embedding"] = embedding
                 
                 # Upsert to Supabase
                 # Convert the float list to a string formatted as a Postgres array or pgvector literal

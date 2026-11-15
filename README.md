@@ -20,6 +20,7 @@ Connector notes:
 | `backend/` | FastAPI app (Python 3.11) |
 | `frontend/` | React 19 + Vite + TypeScript |
 | `integrations/handshake/` | Connector helper (Brightspace + Handshake MCP, Python 3.12+) |
+| `integrations/piazza/` | Account-scoped Piazza MCP and persistent Chromium sign-in (Python 3.12+) |
 | `supabase/migrations/` | Database schema |
 | `docs/` | Integration notes |
 

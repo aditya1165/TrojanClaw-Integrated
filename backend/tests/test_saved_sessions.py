@@ -39,8 +39,8 @@ def test_one_account_never_sees_another_accounts_sessions():
     connectors.set_state(ALICE.id, "handshake", IntegrationState.connected)
     alice = {s.provider.value: s.state for s in connectors.statuses(ALICE.id)}
     bob = {s.provider.value: s.state for s in connectors.statuses(BOB.id)}
-    assert alice == {"brightspace": "saved", "handshake": "connected", "piazza": "unavailable"}
-    assert bob == {"brightspace": "not_configured", "handshake": "not_configured", "piazza": "unavailable"}
+    assert alice == {"brightspace": "saved", "handshake": "connected", "piazza": "not_configured"}
+    assert bob == {"brightspace": "not_configured", "handshake": "not_configured", "piazza": "not_configured"}
 
 
 def test_helper_gets_only_the_accounts_own_folders(monkeypatch, tmp_path):

@@ -58,7 +58,7 @@ def test_chat_requires_latest_message_to_be_user() -> None:
 
 def test_chat_preserves_frontend_response_contract() -> None:
     class FakeChatService:
-        def chat(self, _request, *, user_id) -> ChatResponse:
+        async def chat(self, _request, *, user_id, use_saved_connectors=False) -> ChatResponse:
             assert str(user_id) == "00000000-0000-0000-0000-000000000002"
             return ChatResponse(response="Hello from TrojanClaw")
 
@@ -72,4 +72,5 @@ def test_chat_preserves_frontend_response_contract() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {"response": "Hello from TrojanClaw", "calendar_proposals": []}
+    # The frontend reads `response`; `sources` and `calendar_proposals` are additive.
+    assert response.json() == {"response": "Hello from TrojanClaw", "sources": [], "calendar_proposals": []}

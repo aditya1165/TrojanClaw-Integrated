@@ -64,14 +64,14 @@ export function Connectors({ selected, onChange }: {
     <div className="connector-grid">
       {order.map((provider) => {
         const connector = connectors.find((item) => item.provider === provider);
-        const state = connector?.state ?? (provider === "piazza" ? "unavailable" : "not_configured");
+        const state = connector?.state ?? "not_configured";
         const waiting = busy.includes(provider) || state === "connecting";
-        const disabled = provider === "piazza" || !connector;
+        const disabled = !connector;
         const enabled = state === "connected" || state === "saved";
         return <article className={`connector-card ${state}`} key={provider}>
           <div className="connector-title"><strong>{labels[provider]}</strong><span className="connector-dot" /></div>
           <p role="status">{stateLabels[state]}</p>
-          {provider !== "piazza" && <>
+          <>
             <div className="connector-actions">
               <button type="button" disabled={disabled || waiting}
                 onClick={() => void act(provider, "connect")}>
@@ -85,12 +85,12 @@ export function Connectors({ selected, onChange }: {
               onChange={(event) => onChange(event.target.checked
                 ? [...selected.filter((item) => item !== provider), provider]
                 : selected.filter((item) => item !== provider))} />Use in chat</label>
-          </>}
+          </>
           {connector?.message && state !== "unavailable" && <small>{connector.message}</small>}
         </article>;
       })}
     </div>
-    <p className="connector-note">Sign in with USC connects Brightspace and Handshake automatically. Connect opens a sign-in window on this computer for anything that still needs it. Selected sources are read only.</p>
+    <p className="connector-note">Sign in with USC connects Brightspace and Handshake automatically. Piazza has a separate sign-in in Chromium. Reading Piazza threads tries to preserve unread status.</p>
     {error && <p className="error-text" role="alert">{error}</p>}
   </section>;
 }
