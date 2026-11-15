@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from uuid import UUID
 import json
 import os
 
@@ -105,7 +106,22 @@ def test_chat_connector_path_does_not_require_campus_database(monkeypatch):
 
     service = ChatService(None, None, None, Model())
     request = ChatRequest(messages=[{"role": "user", "content": "My profile?"}], connectors=["handshake"])
-    assert service.chat(request).response == "Your profile"
+    assert service.chat(request, user_id=UUID(int=2)).response == "Your profile"
+
+
+def test_connector_chat_preserves_authenticated_engagesc_context(monkeypatch):
+    from unittest.mock import MagicMock
+
+    campus = MagicMock()
+    campus.prompt_context.return_value = "Public EngageSC event: Robotics workshop"
+    model = MagicMock()
+    model.respond_with_tools.return_value = "Your events"
+    monkeypatch.setattr("app.services.chat.get_local_connectors", lambda: SimpleNamespace(tools=lambda _: []))
+    service = ChatService(None, None, None, model, campus)
+    request = ChatRequest(messages=[{"role": "user", "content": "My events?"}], connectors=["handshake"])
+    assert service.chat(request, user_id=UUID(int=2)).response == "Your events"
+    campus.prompt_context.assert_called_once_with(UUID(int=2))
+    assert "Robotics workshop" in model.respond_with_tools.call_args.args[1]
 
 
 def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch):
@@ -149,6 +165,7 @@ def test_model_tool_loop_dispatches_only_selected_tools(monkeypatch):
     assert requests[-1]["messages"][-1]["content"][0]["type"] == "tool_result"
 
 
+@pytest.mark.usefixtures("signed_in_account")
 def test_piazza_is_not_selectable_in_chat():
     response = TestClient(app).post("/chat", json={
         "messages": [{"role": "user", "content": "Hello"}], "connectors": ["piazza"],

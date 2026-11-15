@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from app.dependencies import get_chat_service
 from app.main import app
@@ -6,6 +7,7 @@ from app.models.chat import ChatResponse
 
 
 client = TestClient(app)
+pytestmark = pytest.mark.usefixtures("signed_in_account")
 
 
 def test_healthcheck() -> None:
@@ -54,7 +56,8 @@ def test_chat_requires_latest_message_to_be_user() -> None:
 
 def test_chat_preserves_frontend_response_contract() -> None:
     class FakeChatService:
-        def chat(self, _request) -> ChatResponse:
+        def chat(self, _request, *, user_id) -> ChatResponse:
+            assert str(user_id) == "00000000-0000-0000-0000-000000000002"
             return ChatResponse(response="Hello from TrojanClaw")
 
     app.dependency_overrides[get_chat_service] = lambda: FakeChatService()
