@@ -4,7 +4,7 @@ import type { Theme } from "../theme";
 export function Logo() {
   return (
     <div className="flex items-center gap-2.5">
-      <img src="/logo.png" alt="" className="h-8 w-8 object-contain" />
+      <img src="/logo.gif" alt="" className="h-8 w-8 object-contain" />
       <span className="text-base font-semibold tracking-tight">TrojanClaw</span>
     </div>
   );

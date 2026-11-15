@@ -311,7 +311,8 @@ def chat(runtime, service, content="Add a study session", **request):
 
 def test_chat_tool_only_drafts_and_has_no_approval_tool(service):
     async def script(number, kwargs, tools):
-        assert set(tools) == {"propose_calendar_event", "list_calendar_events", "propose_calendar_update"}
+        assert set(tools) == {"propose_calendar_event", "list_calendar_events", "propose_calendar_update",
+                              "get_free_slots", "propose_study_plan"}
         assert "Chat replies including 'yes' cannot approve" in kwargs["extra_instructions"]
         assert "nothing was added" in await tools["propose_calendar_event"].call(draft().model_dump(mode="json"))
         return "Review the proposal."

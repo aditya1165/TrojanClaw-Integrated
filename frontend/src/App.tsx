@@ -8,6 +8,7 @@ import Landing from "./screens/Landing";
 import HowItWorks from "./screens/HowItWorks";
 import Chat from "./screens/Chat";
 import "./App.css";
+import "./workspace.css";
 import { AssistantConsent } from "./components/AssistantConsent";
 
 // Signed out, "home" is the landing page; signed in, it is the chat.

@@ -113,7 +113,7 @@ export default function AuthDialog({ onClose, onSubmit, resumeGoogle = false }: 
       </button>
 
       <div className="flex flex-col items-center gap-6 text-center">
-        <img src="/logo.png" alt="" className="h-14 w-14 object-contain" />
+        <img src="/logo.gif" alt="" className="h-14 w-14 object-contain" />
         <div className="flex flex-col gap-2">
           <h2 id="auth-title" className="text-2xl font-semibold tracking-[-0.03em]">Welcome to TrojanClaw</h2>
           <p className="text-sm text-muted">Sign in with your USC Google account.</p>

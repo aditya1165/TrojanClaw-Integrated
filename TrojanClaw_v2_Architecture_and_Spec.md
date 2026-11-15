@@ -1130,7 +1130,7 @@ What exists in the repository today, as opposed to what this spec describes:
 | **Piazza prototype** | ✅ `mcp-piazza` password login works and `list_courses` returns the owner's courses. **Not wired into the backend**; its card shows "Coming soon" (Piazza cannot use the USC login) | `docs/piazza.md`, §2.4 |
 | **Tests** | ✅ 166 backend tests (3 more need the live DB and network): API contract, auth, USC and Google sign-in, connectors and their use in chat (per-account saved sessions, caching, local-only), calendar drafts and approval, EngageSC, embeddings, agent config, MCP tools, per-student isolation, retrieval filters, error mapping. ✅ 66 connector-helper tests (including Handshake events and career fairs) | `backend/tests/`, `integrations/handshake/tests/` |
 | **Frontend** | 🟡 React 19 + Vite + TypeScript, USC cardinal theme with light/dark. Landing, How it works and Chat screens; sign-in with USC, USC Google or a password; saved chats (search, pin, rename, delete); streamed replies with tool activity and source chips; Sources menu and window; calendar review cards; Settings; resizable sidebar and phone drawer. No Sync Helper pairing or dashboard yet | §4, `frontend/src/` |
-| **Scheduling core (reference code)** | 🟡 Free-slot engine and validator code written in §5.5 and §5.7 and checked against a sample week; **not yet in `backend/`** | §5.5–§5.7 |
+| **Study planning ("plan my week")** | ✅ In the chat agent when Google Calendar is connected: `get_free_slots` computes free slots from the calendar (study hours, buffers; Claude only picks slot IDs) and `propose_study_plan` places and checks all blocks in one call (fits the slot, no overlap, before its deadline, daily limit), all or nothing. Blocks are normal calendar drafts approved together from one plan card (Add all, Discard, per-block Edit/Remove), each re-checked against free/busy. Settings in `config/scheduling.yaml`. ⏳ Undo (deleting added blocks) and preferences per student | §5.5, §5.7, `services/study_plan.py`, `components/Calendar.tsx` |
 
 ### 6.2 Pending (Not Started Unless Noted)
 
@@ -1170,8 +1170,8 @@ What exists in the repository today, as opposed to what this spec describes:
 * **Agent, scheduling & calendar:**
   * ✅ MCP server, per-student binding, agent runtime, `config/agent.yaml`, the `chat` goal and its prompt.
   * ✅ Save conversations. ⏳ Log runs to `agent_runs` / `agent_tool_calls`.
-  * ⏳ `POST /agent/{goal}` with streamed progress; the `plan_week` goal and prompt; `config/scheduling.yaml`.
-  * ⏳ Scheduling and calendar tools: free slots (§5.5), proposal validation (§5.7), agenda.
+  * ✅ Streamed chat replies; ✅ study planning in the chat goal with `config/scheduling.yaml`. ⏳ A separate `plan_week` goal and `POST /agent/{goal}` (not needed while planning runs in chat).
+  * ✅ Scheduling and calendar tools: free slots (§5.5), plan validation (§5.7), agenda (`list_calendar_events`). ⏳ Undo for added study blocks.
   * ✅ Single-event calendar drafts in chat, with approve, edit and cancel endpoints (Google Calendar). ⏳ Undo and multi-block study plans.
 * **Frontend:** Sync Helper pairing and sync status; the dashboard (§4) with the plan-week flow and agent-suggested prompts. (Source chips, streamed progress and tool activity in chat are built.)
 * **Hosting** for the backend and frontend, and the end-to-end demo script.

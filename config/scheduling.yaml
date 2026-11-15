@@ -1,0 +1,14 @@
+# Study planning ("plan my week"). Free time and block times are computed in code from the
+# student's Google Calendar; Claude only picks which free slots to use. Restart the backend
+# after editing.
+
+study_hours:
+  start: "08:00"               # earliest a study block may start (student's time zone)
+  end: "22:00"                 # latest a study block may end
+buffer_minutes: 15             # kept free before and after existing events, and between blocks
+min_block_minutes: 30
+max_block_minutes: 180
+max_study_minutes_per_day: 360 # planned study per day, across all blocks in one plan
+max_blocks_per_plan: 12
+horizon_days: 14               # furthest ahead get_free_slots looks
+round_to_minutes: 15           # slots start and end on this grid (for example 4:15, 4:30)

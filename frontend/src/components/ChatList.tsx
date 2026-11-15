@@ -27,7 +27,7 @@ export default function ChatList({ conversations, search, onSearch, activeId, er
   );
 
   return (
-    <nav aria-label="Chats" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+    <nav aria-label="Chats" className="chat-history flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
       <label className="mx-1 mt-3 mb-1 flex min-h-10 items-center gap-2 rounded-lg border border-line bg-bg px-2.5 text-muted focus-within:border-muted">
         <SearchIcon />
         <input id="chat-search" type="search" value={search} onChange={(event) => onSearch(event.target.value)}
@@ -100,7 +100,7 @@ function ChatItem({ chat, active, onOpen, onRename, onPin, onDelete }: {
   }
 
   return (
-    <div ref={ref} className={`group relative flex items-center rounded-lg ${active ? "bg-subtle" : "hover:bg-subtle"}`}>
+    <div ref={ref} className={`history-item group relative flex items-center rounded-lg ${active ? "is-active bg-subtle" : "hover:bg-subtle"}`}>
       <button type="button" onClick={onOpen} disabled={busy} aria-current={active ? "page" : undefined}
         className={`flex min-h-10 min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm ${active ? "font-medium text-fg" : "text-muted group-hover:text-fg"}`}>
         {chat.pinned && <span className="flex-none text-muted" aria-label="Pinned"><PinIcon /></span>}
